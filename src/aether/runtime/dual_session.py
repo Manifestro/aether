@@ -1,11 +1,12 @@
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Set
 
+from aether.domain.audio import AudioChunk
 from aether.domain.chunks import ChunkState, SpeechChunk
 from aether.domain.events import EventKind, SemanticEvent, ToolCall, ToolResult
 from aether.domain.timeline import Timeline, TraceEvent
-from aether.model.protocols import Planner, Speaker, ToolExecutor
+from aether.model.protocols import Planner, Speaker, ToolExecutor, VoiceHead
 from aether.runtime.converters import SequenceGuard, chunk_from, tool_call_from
 
 
@@ -16,6 +17,7 @@ class DualSessionResult:
     chunks: List[SpeechChunk]
     facts: Dict[str, ToolResult]
     timeline: Timeline
+    audio: Dict[str, AudioChunk] = field(default_factory=dict)
 
 
 class DualSessionRuntime:
@@ -26,10 +28,23 @@ class DualSessionRuntime:
     orchestration and dependency rules tested here.
     """
 
-    def __init__(self, planner: Planner, speaker: Speaker, tools: ToolExecutor) -> None:
+    def __init__(
+        self,
+        planner: Planner,
+        speaker: Speaker,
+        tools: ToolExecutor,
+        voice_head: Optional[VoiceHead] = None,
+    ) -> None:
         self._planner = planner
         self._speaker = speaker
         self._tools = tools
+        # Optional and off by default: existing callers (SequentialBaseline
+        # comparisons, every Level A test) get byte-for-byte the same
+        # behaviour. When present, it is exercised at the same commit
+        # horizon as text — see speaker_worker below — which is the point
+        # of the experiment (does ChunkState's transition table already
+        # cover audio, or does audio need its own state machine).
+        self._voice_head = voice_head
 
     async def run(
         self,
@@ -51,6 +66,7 @@ class DualSessionRuntime:
         chunks: List[SpeechChunk] = []
         chunks_by_id: Dict[str, SpeechChunk] = {}
         facts: Dict[str, ToolResult] = {}
+        audio: Dict[str, AudioChunk] = {}
         spoken: List[str] = []
         dispatched: Set[str] = set()
         tool_tasks: List["asyncio.Task[None]"] = []
@@ -114,6 +130,25 @@ class DualSessionRuntime:
                     if chunk.state is ChunkState.CANCELLED:
                         timeline.record("chunk_skip_cancelled_after_generate", chunk_id=chunk.chunk_id)
                         continue
+                    if self._voice_head is not None:
+                        timeline.record("chunk_audio_generating", chunk_id=chunk.chunk_id)
+                        audio_chunk = await self._voice_head.synthesize(chunk, text, facts)
+                        # Same race as the text path above: a replan may
+                        # cancel this chunk while synthesis was in flight.
+                        # The audio is discarded exactly like buffered text
+                        # would be — no separate audio state machine.
+                        if chunk.state is ChunkState.CANCELLED:
+                            timeline.record(
+                                "chunk_audio_skip_cancelled_after_synthesize",
+                                chunk_id=chunk.chunk_id,
+                            )
+                            continue
+                        audio[chunk.chunk_id] = audio_chunk
+                        timeline.record(
+                            "chunk_audio_buffered",
+                            chunk_id=chunk.chunk_id,
+                            token_count=len(audio_chunk.tokens),
+                        )
                     chunk.transition_to(ChunkState.BUFFERED)
                     timeline.record("chunk_buffered", chunk_id=chunk.chunk_id)
                     chunk.transition_to(ChunkState.COMMITTED)
@@ -122,6 +157,7 @@ class DualSessionRuntime:
                         chunk_id=chunk.chunk_id,
                         text=text,
                         safe_to_say=not chunk.dependencies,
+                        has_audio=chunk.chunk_id in audio,
                     )
                     chunk.transition_to(ChunkState.PLAYED)
                     timeline.record("chunk_played", chunk_id=chunk.chunk_id)
@@ -203,5 +239,6 @@ class DualSessionRuntime:
             chunks=chunks,
             facts=facts,
             timeline=timeline,
+            audio=audio,
         )
 

@@ -1,6 +1,7 @@
 import asyncio
 from typing import AsyncIterator, Dict, List, Mapping
 
+from aether.domain.audio import AudioChunk
 from aether.domain.chunks import SpeechChunk
 from aether.domain.events import EventKind, SemanticEvent, ToolCall, ToolResult
 from aether.model.generation import GenerationRequest
@@ -87,6 +88,39 @@ class DeterministicSpeaker:
         return (
             f"Сейчас {weather['temperature_c']} градуса, ожидается дождь — "
             "зонт лучше взять."
+        )
+
+
+class FakeVoiceHead:
+    """Deterministic stand-in for a Voice Head — no torch, no codec.
+
+    Returns a fixed token per character of the supplied text so tests can
+    assert on token content deterministically. ``latency_ms`` lets a test
+    put a real ``await`` between ``chunk_audio_generating`` and
+    ``chunk_audio_buffered`` so it can exercise the cancel-while-synthesizing
+    race the same way ``FakeWeatherTool``/``DeterministicSpeaker`` already do
+    for tools and text.
+    """
+
+    def __init__(self, latency_ms: int = 0) -> None:
+        self.latency_ms = latency_ms
+        self.calls: List[str] = []
+
+    async def synthesize(
+        self,
+        chunk: SpeechChunk,
+        text: str,
+        facts: Mapping[str, ToolResult],
+    ) -> AudioChunk:
+        self.calls.append(chunk.chunk_id)
+        if self.latency_ms:
+            await asyncio.sleep(self.latency_ms / 1000)
+        tokens = tuple(ord(character) % 97 for character in text) or (0,)
+        return AudioChunk(
+            chunk_id=chunk.chunk_id,
+            codebook_index=0,
+            tokens=tokens,
+            frame_rate_hz=12.5,
         )
 
 

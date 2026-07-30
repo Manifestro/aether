@@ -11,9 +11,17 @@
 3. [`notebooks/aether_stage3_colab.ipynb`](../notebooks/aether_stage3_colab.ipynb) — latency sweep
    (3000/1500/750/300 мс) × 3 сценария (успешный tool call, падение tool call, реплика без tool
    call), с явным разделением hard safety checks и soft/latency-dependent observations.
+4. [`notebooks/aether_stage4_voice_colab.ipynb`](../notebooks/aether_stage4_voice_colab.ipynb) —
+   Phase C (`docs/plan.md` §7), минимальный **структурный** probe Voice Head: один Mimi codebook,
+   from-scratch и намеренно необученный Voice Head поверх Speaker-текста. Проверяет только одно —
+   переносится ли `ChunkState`'s commit horizon на аудио без изменений (аудио-чанк не коммитится
+   раньше подтверждённого факта, буферизованный синтез корректно отменяется при replan). Качество
+   звучания, просодия и эмоции здесь не оцениваются и не являются критерием выхода — см.
+   `aether/model/voice_head.py` и `aether/experiments/colab_stage4.py`.
 
-Продуктовый API (Stage 4, `aether_api`) переехал в отдельный репозиторий
-[`Manifestro/aether-api`](https://github.com/Manifestro/aether-api) вместе со своим notebook.
+Продуктовый API (`aether_api`, HTTP/FastAPI) переехал в отдельный репозиторий
+[`Manifestro/aether-api`](https://github.com/Manifestro/aether-api) вместе со своим notebook — это
+не то же самое, что Stage 4 выше (тот остаётся research-core).
 
 ## Перед запуском
 
@@ -22,16 +30,22 @@
 3. Выбери GPU runtime: **Runtime → Change runtime type → GPU**.
 4. В первой исполняемой ячейке укажи `REPO_URL`/`BRANCH`.
 
-Каждый notebook выполняет: клонирование репозитория → проверку GPU → установку проекта с
-`[dev,ml]` extras → dependency-free тесты → явную загрузку `Qwen/Qwen3-1.7B` → эксперимент →
-упаковку диагностических файлов в архив.
+Каждый notebook выполняет: клонирование репозитория → проверку GPU → установку проекта
+(`[dev,ml]` extras для stage1-3, `[dev,ml,audio]` для stage4) → dependency-free тесты → явную
+загрузку `Qwen/Qwen3-1.7B` (и для stage4 — Mimi) → эксперимент → упаковку диагностических файлов
+в архив.
+
+**GPU для stage4:** тот же T4, что уже проверен на stage1-3, — Mimi компактен, а сам Voice Head
+работает на CPU по умолчанию. A100 не обязателен для этого эксперимента.
 
 ## Что прислать для анализа
 
 После выполнения последней ячейки Colab скачает архив `aether-colab-stage{N}-logs.zip`, внутри:
 
-- `report.json` — структурированный результат (у stage2/3 — с `checks`/`observations` или `proof`);
+- `report.json` — структурированный результат (у stage2/3/4 — с `checks`/`observations` или `proof`);
 - `raw_generations.jsonl` (stage1/2) — сырой текст, сгенерированный каждой логической сессией;
+- `wav/*.wav` (stage4) — сырой аудио-выход через Mimi decoder; ожидаемо звучит как шум/артефакты
+  (Voice Head необучен намеренно), это не свидетельствует о поломке эксперимента;
 - `tests.log`, `model_run.log`, `traceback.txt` (если была ошибка);
 - сведения о Python, PyTorch, Transformers, GPU и CUDA.
 
@@ -48,3 +62,8 @@
   зависит от tool latency и от скорости GPU (latency crossover, см.
   `docs/reports/technical_report_02.md` §6). Единственный жёсткий инвариант — факт никогда не
   озвучивается до подтверждения tool result; это проверяется в каждом прогоне отдельно от lookahead.
+- Stage 4 не доказывает нативный speech-to-speech и не измеряет качество голоса — Mimi decoder
+  реален (frozen, pretrained), но Voice Head, предсказывающий его токены, специально не обучен.
+  Проверяется только структурный перенос commit horizon на аудио (§20 `spec.md`: Continue/Refine/
+  Fallback/Pivot принимается по трассе этого прогона, не по звучанию). Обучение Voice Head,
+  дополнительные codebooks (Depth Transformer) и просодия — следующие, отдельные шаги.
