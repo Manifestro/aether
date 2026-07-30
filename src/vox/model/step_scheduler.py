@@ -44,6 +44,7 @@ class _ScheduledSession:
     token_count: int = 0
     decode_started: bool = False
     first_token_emitted: bool = False
+    closed: bool = False
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,22 @@ class InterleavedDecodeScheduler(TextGenerationBackend):
         finally:
             await self._remove_session(request.session_id, cancelled=True)
 
+    async def complete(self, session_id: str, reason: str = "consumer_stop") -> None:
+        """Mark a stream as normally complete before model EOS.
+
+        Planner uses this when the semantic protocol emits `turn_complete`.
+        It prevents an intentional early stop from being reported as a failure
+        or barge-in cancellation.
+        """
+        async with self._get_lock():
+            session = self._sessions.pop(session_id, None)
+            if session is not None:
+                session.closed = True
+        if session is None:
+            return
+        self._record("decode_completed", session, token_count=session.token_count, reason=reason)
+        await self._engine.close(session.state)
+
     def _get_lock(self) -> asyncio.Lock:
         if self._lock is None:
             self._lock = asyncio.Lock()
@@ -135,6 +152,8 @@ class InterleavedDecodeScheduler(TextGenerationBackend):
                     session.decode_started = True
                     self._record("decode_started", session)
                 result = await self._engine.step(session.state)
+                if session.closed:
+                    continue
                 session.token_count += result.token_count
                 if result.text:
                     if not session.first_token_emitted:
@@ -177,6 +196,7 @@ class InterleavedDecodeScheduler(TextGenerationBackend):
             session = self._sessions.pop(session_id, None)
         if session is None:
             return
+        session.closed = True
         if cancelled:
             self._record("decode_cancelled", session, token_count=session.token_count)
         await self._engine.close(session.state)

@@ -45,6 +45,9 @@ class InterleavedDecodeSchedulerTests(unittest.IsolatedAsyncioTestCase):
         speaker_started = trace_index(trace, "decode_started", "speaker")
         planner_completed = trace_index(trace, "decode_completed", "planner")
         self.assertLess(speaker_started, planner_completed)
+        self.assertFalse(
+            any(event.name == "decode_cancelled" and event.role == "planner" for event in trace)
+        )
         self.assertNotEqual(
             engine.created_states[0],
             engine.created_states[1],

@@ -57,10 +57,16 @@ class QwenPlannerAdapter:
             for event in parser.feed(text):
                 yield event
                 if event.kind is EventKind.TURN_COMPLETE:
+                    complete = getattr(self._backend, "complete", None)
+                    if complete is not None:
+                        await complete(generation.session_id, reason="turn_complete")
                     return
         for event in parser.finish():
             yield event
             if event.kind is EventKind.TURN_COMPLETE:
+                complete = getattr(self._backend, "complete", None)
+                if complete is not None:
+                    await complete(generation.session_id, reason="turn_complete")
                 return
 
 
