@@ -37,6 +37,7 @@ class DualSessionRuntime:
 
         events: List[SemanticEvent] = []
         chunks: List[SpeechChunk] = []
+        chunks_by_id: Dict[str, SpeechChunk] = {}
         facts: Dict[str, ToolResult] = {}
         spoken: List[str] = []
         dispatched: Set[str] = set()
@@ -81,12 +82,24 @@ class DualSessionRuntime:
                 try:
                     if chunk is None:
                         return
+                    # A replan may have cancelled this chunk while it was
+                    # queued (buffered, not yet generating). Never speak it.
+                    if chunk.state is ChunkState.CANCELLED:
+                        timeline.record("chunk_skip_cancelled", chunk_id=chunk.chunk_id)
+                        continue
                     if not started:
                         timeline.record("speaker_started")
                         started = True
                     chunk.transition_to(ChunkState.GENERATING)
                     timeline.record("chunk_generating", chunk_id=chunk.chunk_id)
                     text = await self._speaker.generate(chunk, facts)
+                    # A replan may have cancelled this chunk while `generate`
+                    # was in flight. The committed prefix (already-played
+                    # chunks) is untouched; only this still-buffered output
+                    # is dropped.
+                    if chunk.state is ChunkState.CANCELLED:
+                        timeline.record("chunk_skip_cancelled_after_generate", chunk_id=chunk.chunk_id)
+                        continue
                     chunk.transition_to(ChunkState.BUFFERED)
                     timeline.record("chunk_buffered", chunk_id=chunk.chunk_id)
                     chunk.transition_to(ChunkState.COMMITTED)
@@ -117,7 +130,32 @@ class DualSessionRuntime:
                 elif event.kind is EventKind.SPEECH_PLAN:
                     chunk = chunk_from(event)
                     chunks.append(chunk)
+                    chunks_by_id[chunk.chunk_id] = chunk
                     await dispatch_if_ready(chunk)
+                elif event.kind is EventKind.REPLAN:
+                    for chunk_id in event.payload.get("cancel_chunk_ids", []):
+                        target = chunks_by_id.get(chunk_id)
+                        if target is None:
+                            timeline.record(
+                                "replan_unknown_chunk",
+                                chunk_id=chunk_id,
+                                revision_id=event.revision_id,
+                            )
+                        elif target.cancellable:
+                            target.transition_to(ChunkState.CANCELLED)
+                            timeline.record(
+                                "chunk_cancelled",
+                                chunk_id=chunk_id,
+                                revision_id=event.revision_id,
+                            )
+                        else:
+                            # Committed/played speech is never rewritten.
+                            timeline.record(
+                                "chunk_cancel_rejected",
+                                chunk_id=chunk_id,
+                                revision_id=event.revision_id,
+                                state=target.state.value,
+                            )
         except BaseException:
             for task in tool_tasks:
                 task.cancel()

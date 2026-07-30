@@ -31,7 +31,7 @@ class QwenAdapterContractTests(unittest.IsolatedAsyncioTestCase):
             chunk_size=7,
         )
         runtime = DualSessionRuntime(
-            QwenPlannerAdapter(backend),
+            QwenPlannerAdapter(backend, tools=["weather"]),
             QwenSpeakerAdapter(backend),
             FakeWeatherTool(latency_ms=10),
         )
@@ -59,12 +59,30 @@ class QwenAdapterContractTests(unittest.IsolatedAsyncioTestCase):
             },
             chunk_size=5,
         )
-        planner = QwenPlannerAdapter(backend)
+        planner = QwenPlannerAdapter(backend, tools=["weather"])
 
         events = [event async for event in planner.plan("turn-stop", "Погода?")]
 
         self.assertEqual(events[-1].kind.value, "turn_complete")
         self.assertEqual(len(events), 4)
+
+    async def test_system_prompt_declares_the_granted_tool_allowlist(self) -> None:
+        backend = ScriptedSharedBackend({"planner": '{"type":"turn_complete","sequence":0,"payload":{}}\n'})
+        planner = QwenPlannerAdapter(backend, tools=["currency"])
+
+        _ = [event async for event in planner.plan("turn-tools", "Курс доллара?")]
+
+        system_message = backend.requests[0].messages[0]["content"]
+        self.assertIn("Allowed tools for this turn: currency", system_message)
+
+    async def test_system_prompt_forbids_any_tool_when_none_granted(self) -> None:
+        backend = ScriptedSharedBackend({"planner": '{"type":"turn_complete","sequence":0,"payload":{}}\n'})
+        planner = QwenPlannerAdapter(backend, tools=[])
+
+        _ = [event async for event in planner.plan("turn-no-tools", "Привет!")]
+
+        system_message = backend.requests[0].messages[0]["content"]
+        self.assertIn("never call a tool this turn", system_message)
 
 
 if __name__ == "__main__":

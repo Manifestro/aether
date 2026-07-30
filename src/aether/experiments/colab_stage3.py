@@ -15,7 +15,7 @@ import traceback
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from aether.experiments.colab_stage1 import RecordingBackend, environment_report, write_json
 from aether.experiments.colab_stage2 import first_absolute, runtime_trace, scheduler_trace
@@ -24,6 +24,7 @@ from aether.model.qwen_backbone import QwenBackboneConfig, SharedQwenBackbone
 from aether.model.qwen_step_engine import QwenTokenStepEngine
 from aether.model.step_scheduler import InterleavedDecodeScheduler
 from aether.runtime.dual_session import DualSessionRuntime
+from aether.runtime.tool_executor import AllowlistToolExecutor
 from aether.testing.fakes import FakeWeatherTool
 
 DEFAULT_LATENCIES_MS = [3000, 1500, 750, 300]
@@ -35,6 +36,7 @@ class Scenario:
     request: str
     tool_fail: bool
     sweep_latency: bool
+    tools: Tuple[str, ...] = ("weather",)
 
 
 SCENARIOS: List[Scenario] = [
@@ -43,18 +45,24 @@ SCENARIOS: List[Scenario] = [
         request="Какая погода в Алматы и нужен ли зонт?",
         tool_fail=False,
         sweep_latency=True,
+        tools=("weather",),
     ),
     Scenario(
         name="weather_tool_failure",
         request="Какая погода в Алматы и нужен ли зонт?",
         tool_fail=True,
         sweep_latency=True,
+        tools=("weather",),
     ),
     Scenario(
         name="no_tool_greeting",
         request="Привет! Как у тебя дела?",
         tool_fail=False,
         sweep_latency=False,
+        # No tool granted for this turn: the Planner must answer directly
+        # instead of inventing one. AllowlistToolExecutor + the empty prompt
+        # allowlist together are the regression test for that finding.
+        tools=(),
     ),
 ]
 
@@ -131,11 +139,13 @@ async def run_single(
         engine, speaker_weight=speaker_weight, planner_weight=planner_weight
     )
     recorder = RecordingBackend(scheduler)
-    planner = QwenPlannerAdapter(recorder)
+    planner = QwenPlannerAdapter(recorder, tools=list(scenario.tools))
     runtime = DualSessionRuntime(
         planner,
         QwenSpeakerAdapter(recorder),
-        FakeWeatherTool(latency_ms=latency_ms, fail=scenario.tool_fail),
+        AllowlistToolExecutor(
+            scenario.tools, FakeWeatherTool(latency_ms=latency_ms, fail=scenario.tool_fail)
+        ),
     )
 
     run_started = time.monotonic_ns()

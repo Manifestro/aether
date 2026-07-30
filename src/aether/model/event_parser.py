@@ -118,6 +118,11 @@ class SemanticEventStreamParser:
         elif strict and kind is EventKind.REPLAN:
             if not isinstance(payload.get("reason"), str) or not payload["reason"].strip():
                 raise ValueError("replan payload must include a non-empty reason")
+            cancel_chunk_ids = payload.get("cancel_chunk_ids", [])
+            if not isinstance(cancel_chunk_ids, list) or not all(
+                isinstance(item, str) for item in cancel_chunk_ids
+            ):
+                raise ValueError("replan payload cancel_chunk_ids must be a string list")
         elif strict and kind is EventKind.TURN_COMPLETE:
             if payload:
                 raise ValueError("turn_complete payload must be empty in strict grammar")

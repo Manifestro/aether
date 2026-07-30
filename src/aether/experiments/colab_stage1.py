@@ -22,6 +22,7 @@ from aether.model.generation import GenerationRequest, TextGenerationBackend
 from aether.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
 from aether.model.qwen_backbone import QwenBackboneConfig, SharedQwenBackbone
 from aether.runtime.dual_session import DualSessionRuntime
+from aether.runtime.tool_executor import AllowlistToolExecutor
 from aether.testing.fakes import FakeWeatherTool
 
 
@@ -148,9 +149,9 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
         report["model_load_ms"] = (time.monotonic_ns() - load_started_ns) / 1_000_000
 
         runtime = DualSessionRuntime(
-            QwenPlannerAdapter(recorder),
+            QwenPlannerAdapter(recorder, tools=["weather"]),
             QwenSpeakerAdapter(recorder),
-            FakeWeatherTool(latency_ms=args.tool_latency_ms),
+            AllowlistToolExecutor(["weather"], FakeWeatherTool(latency_ms=args.tool_latency_ms)),
         )
         run_started_ns = time.monotonic_ns()
         result = await runtime.run("colab-weather-1", args.request)

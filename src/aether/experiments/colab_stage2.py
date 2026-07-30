@@ -15,6 +15,7 @@ from aether.model.qwen_backbone import QwenBackboneConfig, SharedQwenBackbone
 from aether.model.qwen_step_engine import QwenTokenStepEngine
 from aether.model.step_scheduler import InterleavedDecodeScheduler
 from aether.runtime.dual_session import DualSessionRuntime
+from aether.runtime.tool_executor import AllowlistToolExecutor
 from aether.testing.fakes import FakeWeatherTool
 
 
@@ -87,9 +88,9 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
         )
         recorder = RecordingBackend(scheduler)
         runtime = DualSessionRuntime(
-            QwenPlannerAdapter(recorder),
+            QwenPlannerAdapter(recorder, tools=["weather"]),
             QwenSpeakerAdapter(recorder),
-            FakeWeatherTool(latency_ms=args.tool_latency_ms),
+            AllowlistToolExecutor(["weather"], FakeWeatherTool(latency_ms=args.tool_latency_ms)),
         )
 
         run_started = time.monotonic_ns()

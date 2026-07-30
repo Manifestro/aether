@@ -32,7 +32,7 @@ class InterleavedDecodeSchedulerTests(unittest.IsolatedAsyncioTestCase):
         )
         scheduler = InterleavedDecodeScheduler(engine)
         runtime = DualSessionRuntime(
-            QwenPlannerAdapter(scheduler),
+            QwenPlannerAdapter(scheduler, tools=["weather"]),
             QwenSpeakerAdapter(scheduler),
             FakeWeatherTool(latency_ms=80),
         )
