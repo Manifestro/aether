@@ -64,6 +64,8 @@ class FakeWeatherTool:
         self.calls.append(call)
         if self.latency_ms:
             await asyncio.sleep(self.latency_ms / 1000)
+        if call.name != "weather":
+            return ToolResult(call.call_id, call.name, {}, error=f"unknown tool: {call.name}")
         if self.fail:
             return ToolResult(call.call_id, call.name, {}, error="weather unavailable")
         return ToolResult(

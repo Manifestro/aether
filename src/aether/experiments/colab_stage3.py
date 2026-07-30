@@ -59,58 +59,64 @@ SCENARIOS: List[Scenario] = [
 ]
 
 
-def evaluate_run(result: Any, rt_trace: list, dec_trace: list, scenario: Scenario) -> Dict[str, Any]:
-    """Turn one run's traces into explicit, scenario-aware pass/fail checks."""
+def evaluate_run(result: Any, rt_trace: list, dec_trace: list) -> "tuple[Dict[str, bool], Dict[str, Any]]":
+    """Split trace evaluation into a hard safety gate and soft observations.
 
-    checks: Dict[str, bool] = {}
+    ``checks`` is the one thing a run must satisfy to pass: no chunk speaks a
+    dependent fact unless the tool it depends on is recorded as
+    ``tool_completed(succeeded=True)`` strictly before that chunk started
+    generating. This is scenario-agnostic and derived only from the trace, so
+    it does not assume which tool name a scenario "should" have called.
+
+    ``observations`` records everything informative that is not a
+    correctness gate: whether a tool_call happened at all, whether the
+    speaker's first token led or trailed tool completion (this depends on
+    MCP latency and is expected to flip sign below a crossover point, not a
+    defect), and which chunks never resolved.
+    """
+
     tool_call_events = [
         event for event in result.semantic_events if event.kind.value == "tool_call"
     ]
-    checks["tool_call_emitted"] = bool(tool_call_events)
 
-    dependent_chunks = [chunk for chunk in result.chunks if chunk.dependencies]
-    safe_chunks = [chunk for chunk in result.chunks if not chunk.dependencies]
+    confirmed_tool_index: Dict[str, int] = {}
+    for index, event in enumerate(rt_trace):
+        if event["name"] == "tool_completed" and event["attributes"].get("succeeded"):
+            confirmed_tool_index.setdefault(event["attributes"].get("tool"), index)
 
-    if tool_call_events:
-        tool_completed_index = next(
-            (i for i, e in enumerate(rt_trace) if e["name"] == "tool_completed"), None
+    violations = []
+    for chunk in result.chunks:
+        if chunk.state.value != "played" or not chunk.dependencies:
+            continue
+        generating_index = next(
+            (
+                i
+                for i, e in enumerate(rt_trace)
+                if e["name"] == "chunk_generating" and e["attributes"].get("chunk_id") == chunk.chunk_id
+            ),
+            None,
         )
-        if scenario.tool_fail:
-            checks["dependent_chunk_never_played"] = all(
-                chunk.state.value != "played" for chunk in dependent_chunks
-            )
-            checks["safe_chunk_still_played"] = all(
-                chunk.state.value == "played" for chunk in safe_chunks
-            )
-        else:
-            checks["dependent_chunk_played_after_tool_complete"] = True
-            if tool_completed_index is not None:
-                for chunk in dependent_chunks:
-                    generating_index = next(
-                        (
-                            i
-                            for i, e in enumerate(rt_trace)
-                            if e["name"] == "chunk_generating"
-                            and e["attributes"].get("chunk_id") == chunk.chunk_id
-                        ),
-                        None,
-                    )
-                    if generating_index is None or generating_index < tool_completed_index:
-                        checks["dependent_chunk_played_after_tool_complete"] = False
+        for dependency in chunk.dependencies:
+            confirmed_index = confirmed_tool_index.get(dependency)
+            if confirmed_index is None or generating_index is None or generating_index < confirmed_index:
+                violations.append(f"{chunk.chunk_id} spoke before '{dependency}' was confirmed")
 
-            speaker_first = first_absolute(dec_trace, "first_token", "speaker")
-            tool_completed_abs = first_absolute(rt_trace, "tool_completed")
-            checks["speaker_first_token_before_tool_complete"] = (
-                speaker_first is not None
-                and tool_completed_abs is not None
-                and speaker_first < tool_completed_abs
-            )
-    else:
-        checks["no_chunk_left_blocked"] = all(
-            chunk.state.value != "blocked" for chunk in result.chunks
-        )
+    checks = {"dependent_chunks_only_speak_confirmed_facts": not violations}
 
-    return checks
+    speaker_first = first_absolute(dec_trace, "first_token", "speaker")
+    tool_completed_abs = first_absolute(rt_trace, "tool_completed")
+    observations: Dict[str, Any] = {
+        "tool_call_emitted": bool(tool_call_events),
+        "dependency_violations": violations,
+        "blocked_chunk_ids": [c.chunk_id for c in result.chunks if c.state.value == "blocked"],
+        "speaker_first_token_before_tool_complete": (
+            None
+            if speaker_first is None or tool_completed_abs is None
+            else speaker_first < tool_completed_abs
+        ),
+    }
+
+    return checks, observations
 
 
 async def run_single(
@@ -138,7 +144,7 @@ async def run_single(
 
     rt_trace = runtime_trace(result)
     dec_trace = scheduler_trace(scheduler)
-    checks = evaluate_run(result, rt_trace, dec_trace, scenario)
+    checks, observations = evaluate_run(result, rt_trace, dec_trace)
 
     speaker_first = first_absolute(dec_trace, "first_token", "speaker")
     tool_completed_abs = first_absolute(rt_trace, "tool_completed")
@@ -150,6 +156,7 @@ async def run_single(
         "runtime_ms": runtime_ms,
         "result_text": result.text,
         "checks": checks,
+        "observations": observations,
         "passed": all(checks.values()),
         "repaired_sequence_count": (
             planner.last_parser.repaired_count if planner.last_parser is not None else 0

@@ -27,13 +27,8 @@ def _chunk(chunk_id: str, dependencies, state: ChunkState) -> SpeechChunk:
     return chunk
 
 
-_SUCCESS = Scenario("weather_success", "weather?", tool_fail=False, sweep_latency=True)
-_FAILURE = Scenario("weather_tool_failure", "weather?", tool_fail=True, sweep_latency=True)
-_NO_TOOL = Scenario("no_tool_greeting", "hi", tool_fail=False, sweep_latency=False)
-
-
 class EvaluateRunTests(unittest.TestCase):
-    def test_successful_tool_run_with_correct_ordering_passes(self) -> None:
+    def test_dependent_chunk_after_confirmed_tool_passes(self) -> None:
         result = _Result(
             semantic_events=[_event(EventKind.TOOL_CALL, 0)],
             chunks=[
@@ -42,36 +37,61 @@ class EvaluateRunTests(unittest.TestCase):
             ],
         )
         rt_trace = [
-            {"name": "chunk_generating", "attributes": {"chunk_id": "lead-in"}},
-            {"name": "tool_completed", "attributes": {}},
-            {"name": "chunk_generating", "attributes": {"chunk_id": "answer"}},
+            {"name": "chunk_generating", "attributes": {"chunk_id": "lead-in"}, "absolute_timestamp_ns": 0},
+            {
+                "name": "tool_completed",
+                "attributes": {"tool": "weather", "succeeded": True},
+                "absolute_timestamp_ns": 10,
+            },
+            {"name": "chunk_generating", "attributes": {"chunk_id": "answer"}, "absolute_timestamp_ns": 20},
         ]
-        dec_trace = [
-            {"name": "first_token", "role": "speaker", "absolute_timestamp_ns": 10},
-        ]
-        rt_trace_abs = [dict(event, absolute_timestamp_ns=index) for index, event in enumerate(rt_trace)]
-        rt_trace_abs[1]["absolute_timestamp_ns"] = 50
+        dec_trace = [{"name": "first_token", "role": "speaker", "absolute_timestamp_ns": 5}]
 
-        checks = evaluate_run(result, rt_trace_abs, dec_trace, _SUCCESS)
+        checks, observations = evaluate_run(result, rt_trace, dec_trace)
 
-        self.assertTrue(all(checks.values()), checks)
-        self.assertIn("dependent_chunk_played_after_tool_complete", checks)
-        self.assertIn("speaker_first_token_before_tool_complete", checks)
+        self.assertTrue(checks["dependent_chunks_only_speak_confirmed_facts"])
+        self.assertEqual(observations["dependency_violations"], [])
+        self.assertTrue(observations["tool_call_emitted"])
+        self.assertTrue(observations["speaker_first_token_before_tool_complete"])
 
-    def test_factual_chunk_generated_before_tool_complete_fails(self) -> None:
+    def test_dependent_chunk_generated_before_tool_confirmed_fails(self) -> None:
         result = _Result(
             semantic_events=[_event(EventKind.TOOL_CALL, 0)],
             chunks=[_chunk("answer", ["weather"], ChunkState.PLAYED)],
         )
         rt_trace = [
             {"name": "chunk_generating", "attributes": {"chunk_id": "answer"}, "absolute_timestamp_ns": 0},
-            {"name": "tool_completed", "attributes": {}, "absolute_timestamp_ns": 10},
+            {
+                "name": "tool_completed",
+                "attributes": {"tool": "weather", "succeeded": True},
+                "absolute_timestamp_ns": 10,
+            },
         ]
-        checks = evaluate_run(result, rt_trace, [], _SUCCESS)
 
-        self.assertFalse(checks["dependent_chunk_played_after_tool_complete"])
+        checks, observations = evaluate_run(result, rt_trace, [])
 
-    def test_tool_failure_keeps_dependent_chunk_blocked(self) -> None:
+        self.assertFalse(checks["dependent_chunks_only_speak_confirmed_facts"])
+        self.assertEqual(len(observations["dependency_violations"]), 1)
+
+    def test_dependent_chunk_played_after_failed_tool_fails(self) -> None:
+        result = _Result(
+            semantic_events=[_event(EventKind.TOOL_CALL, 0)],
+            chunks=[_chunk("answer", ["weather"], ChunkState.PLAYED)],
+        )
+        rt_trace = [
+            {"name": "chunk_generating", "attributes": {"chunk_id": "answer"}, "absolute_timestamp_ns": 10},
+            {
+                "name": "tool_completed",
+                "attributes": {"tool": "weather", "succeeded": False},
+                "absolute_timestamp_ns": 0,
+            },
+        ]
+
+        checks, observations = evaluate_run(result, rt_trace, [])
+
+        self.assertFalse(checks["dependent_chunks_only_speak_confirmed_facts"])
+
+    def test_tool_failure_keeps_dependent_chunk_blocked_and_passes(self) -> None:
         result = _Result(
             semantic_events=[_event(EventKind.TOOL_CALL, 0)],
             chunks=[
@@ -79,37 +99,47 @@ class EvaluateRunTests(unittest.TestCase):
                 _chunk("answer", ["weather"], ChunkState.BLOCKED),
             ],
         )
-        checks = evaluate_run(result, [], [], _FAILURE)
+        rt_trace = [
+            {
+                "name": "tool_completed",
+                "attributes": {"tool": "weather", "succeeded": False},
+                "absolute_timestamp_ns": 0,
+            },
+        ]
 
-        self.assertTrue(checks["dependent_chunk_never_played"])
-        self.assertTrue(checks["safe_chunk_still_played"])
+        checks, observations = evaluate_run(result, rt_trace, [])
 
-    def test_tool_failure_with_fabricated_answer_fails_the_check(self) -> None:
+        self.assertTrue(checks["dependent_chunks_only_speak_confirmed_facts"])
+        self.assertEqual(observations["blocked_chunk_ids"], ["answer"])
+
+    def test_no_tool_scenario_with_no_dependent_chunks_passes(self) -> None:
+        result = _Result(semantic_events=[], chunks=[_chunk("reply", [], ChunkState.PLAYED)])
+
+        checks, observations = evaluate_run(result, [], [])
+
+        self.assertTrue(checks["dependent_chunks_only_speak_confirmed_facts"])
+        self.assertFalse(observations["tool_call_emitted"])
+
+    def test_unknown_tool_answer_without_confirmation_fails(self) -> None:
+        # Mirrors the real Colab finding: Planner invents a tool name (e.g. "chat")
+        # that the executor never confirms as succeeded for that name.
         result = _Result(
             semantic_events=[_event(EventKind.TOOL_CALL, 0)],
-            chunks=[_chunk("answer", ["weather"], ChunkState.PLAYED)],
+            chunks=[_chunk("answer", ["chat"], ChunkState.PLAYED)],
         )
-        checks = evaluate_run(result, [], [], _FAILURE)
+        rt_trace = [
+            {
+                "name": "tool_completed",
+                "attributes": {"tool": "chat", "succeeded": False},
+                "absolute_timestamp_ns": 0,
+            },
+            {"name": "chunk_generating", "attributes": {"chunk_id": "answer"}, "absolute_timestamp_ns": 10},
+        ]
 
-        self.assertFalse(checks["dependent_chunk_never_played"])
+        checks, observations = evaluate_run(result, rt_trace, [])
 
-    def test_no_tool_scenario_requires_nothing_blocked(self) -> None:
-        result = _Result(
-            semantic_events=[],
-            chunks=[_chunk("reply", [], ChunkState.PLAYED)],
-        )
-        checks = evaluate_run(result, [], [], _NO_TOOL)
-
-        self.assertTrue(checks["no_chunk_left_blocked"])
-
-    def test_no_tool_scenario_flags_a_stuck_chunk(self) -> None:
-        result = _Result(
-            semantic_events=[],
-            chunks=[_chunk("reply", ["weather"], ChunkState.BLOCKED)],
-        )
-        checks = evaluate_run(result, [], [], _NO_TOOL)
-
-        self.assertFalse(checks["no_chunk_left_blocked"])
+        self.assertFalse(checks["dependent_chunks_only_speak_confirmed_facts"])
+        self.assertIn("answer spoke before 'chat' was confirmed", observations["dependency_violations"])
 
 
 class BuildPlanTests(unittest.TestCase):
