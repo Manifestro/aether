@@ -67,3 +67,11 @@
   Проверяется только структурный перенос commit horizon на аудио (§20 `spec.md`: Continue/Refine/
   Fallback/Pivot принимается по трассе этого прогона, не по звучанию). Обучение Voice Head,
   дополнительные codebooks (Depth Transformer) и просодия — следующие, отдельные шаги.
+- **Известный сбой окружения (найден и исправлен в первом прогоне).** Extra `audio` (`moshi`)
+  подтягивает новый `torch`, не трогая предустановленный в Colab `torchvision` — тот ломается по
+  ABI (`operator torchvision::nms does not exist`), и это рушит совершенно не связанный с нами
+  импорт `transformers.AutoModelForCausalLM` (через vision-утилиты), маскируясь под
+  `ModuleNotFoundError: Could not import module 'Qwen3ForCausalLM'`. Ни разу не доходит до
+  собственно Voice Head кода. Notebook уже переустанавливает `torch`/`torchvision`/`torchaudio`
+  одной командой сразу после установки extras — если ошибка повторится, проверь именно
+  совместимость этой тройки первой.
