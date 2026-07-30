@@ -111,25 +111,39 @@ def run_spike(args: argparse.Namespace, output_dir: Path) -> Dict[str, Any]:
 
     checkpoint_info = loaders.CheckpointInfo.from_hf_repo(args.hf_repo)
     report["checkpoint_info_surface"] = describe_object(checkpoint_info)
+    report["checkpoint_info_tts_stt_config"] = {
+        "tts_config": getattr(checkpoint_info, "tts_config", None),
+        "stt_config": getattr(checkpoint_info, "stt_config", None),
+        "lm_gen_config": getattr(checkpoint_info, "lm_gen_config", None),
+        "model_type": getattr(checkpoint_info, "model_type", None),
+    }
 
     mimi_attempt = try_attempt("checkpoint_info.get_mimi", lambda: checkpoint_info.get_mimi(device=args.device))
     report["attempts"].append(mimi_attempt)
 
+    # First run found the real method name: `get_moshi`, not `get_moshi_lm`
+    # (that name exists only as a module-level function in `loaders`).
     lm_attempt = try_attempt(
-        "checkpoint_info.get_moshi_lm", lambda: checkpoint_info.get_moshi_lm(device=args.device)
+        "checkpoint_info.get_moshi", lambda: checkpoint_info.get_moshi(device=args.device)
     )
     report["attempts"].append(lm_attempt)
     if not lm_attempt["succeeded"]:
         report["status"] = "failed_at_lm_load"
         return report
 
-    lm = checkpoint_info.get_moshi_lm(device=args.device)
+    lm = checkpoint_info.get_moshi(device=args.device)
     report["lm_surface"] = describe_object(lm)
 
     text_tokenizer_attempt = try_attempt(
         "checkpoint_info.get_text_tokenizer", lambda: checkpoint_info.get_text_tokenizer()
     )
     report["attempts"].append(text_tokenizer_attempt)
+    if text_tokenizer_attempt["succeeded"]:
+        tokenizer = checkpoint_info.get_text_tokenizer()
+        encode_attempt = try_attempt(
+            "text_tokenizer.encode(args.text)", lambda: tokenizer.encode(args.text)
+        )
+        report["attempts"].append(encode_attempt)
 
     lm_gen_holder: Dict[str, Any] = {}
 
@@ -145,13 +159,44 @@ def run_spike(args: argparse.Namespace, output_dir: Path) -> Dict[str, Any]:
     if lm_gen_attempt["succeeded"]:
         report["lm_gen_surface"] = describe_object(lm_gen_holder["instance"])
 
+    # `loaders.ConditionProvider`/`ConditionFuser`/`BaseConditioner` suggest a
+    # generic conditioning framework (likely how a TTS-style checkpoint feeds
+    # text/speaker conditions into the LM). Surface it without assuming how
+    # it is wired, since that depends on `lm_config`/`raw_config` we have not
+    # inspected yet for this checkpoint.
+    report["condition_provider_class_surface"] = describe_object(loaders.ConditionProvider)
+    report["condition_fuser_class_surface"] = describe_object(loaders.ConditionFuser)
+    report["lm_config"] = getattr(checkpoint_info, "lm_config", None)
+    report["raw_config"] = getattr(checkpoint_info, "raw_config", None)
+
+    # Kyutai has published TTS-specific checkpoints (Delayed Streams
+    # Modeling) that load through this exact same CheckpointInfo API. This
+    # conversational "moshiko" checkpoint has tts_config == None; a
+    # dedicated TTS repo should populate it. Try known candidate repo ids
+    # defensively -- none of these are confirmed to exist on the installed
+    # moshi version, that is exactly what this loop finds out.
+    tts_candidates = [c.strip() for c in args.tts_repo_candidates.split(",") if c.strip()]
+    tts_probe_results = []
+    for candidate in tts_candidates:
+        probe = try_attempt(
+            f"CheckpointInfo.from_hf_repo({candidate})",
+            lambda candidate=candidate: loaders.CheckpointInfo.from_hf_repo(candidate),
+        )
+        if probe["succeeded"]:
+            candidate_info = loaders.CheckpointInfo.from_hf_repo(candidate)
+            probe["tts_config_populated"] = getattr(candidate_info, "tts_config", None) is not None
+            probe["model_type"] = getattr(candidate_info, "model_type", None)
+        tts_probe_results.append(probe)
+    report["tts_checkpoint_candidates"] = tts_probe_results
+
     report["status"] = "completed"
     report["conclusion_note"] = (
         "This spike does not conclude Moshi can or cannot serve as a teacher for "
         "arbitrary text. It records what its real API surface looks like on the "
-        "installed version. Read `lm_surface`/`lm_gen_surface`/`checkpoint_info_surface` "
-        "for method names and signatures that plausibly accept a text prompt or a "
-        "token-forcing argument, and treat those as the next thing to try by hand."
+        "installed version. Read `lm_surface`/`lm_gen_surface`/`checkpoint_info_surface`/"
+        "`tts_checkpoint_candidates`/`lm_config` for method names, signatures and any "
+        "candidate repo whose `tts_config_populated` is true, and treat those as the "
+        "next thing to try by hand."
     )
     return report
 
@@ -159,6 +204,15 @@ def run_spike(args: argparse.Namespace, output_dir: Path) -> Dict[str, Any]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--hf-repo", default="kyutai/moshiko-pytorch-bf16")
+    parser.add_argument(
+        "--tts-repo-candidates",
+        default="kyutai/tts-1.6b-en_fr,kyutai/tts-1b-en_fr",
+        help=(
+            "Comma-separated candidate HF repo ids for a dedicated Kyutai TTS "
+            "checkpoint, tried defensively -- none are confirmed to exist on "
+            "the installed moshi version. Pass an empty string to skip."
+        ),
+    )
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--text", default="The weather in Almaty is rainy and twenty four degrees.")
     parser.add_argument("--output-dir", default="artifacts/spike-moshi-teacher")
