@@ -40,7 +40,10 @@ class QwenPlannerAdapter:
         self._settings = settings
 
     async def plan(self, turn_id: str, request: str) -> AsyncIterator[SemanticEvent]:
-        parser = SemanticEventStreamParser(turn_id)
+        # Open models occasionally repeat a sequence value while streaming.
+        # Normalize that adapter-boundary defect; the runtime still receives a
+        # strictly increasing, auditable event sequence.
+        parser = SemanticEventStreamParser(turn_id, repair_sequences=True)
         generation = GenerationRequest(
             session_id=f"planner:{turn_id}",
             role="planner",

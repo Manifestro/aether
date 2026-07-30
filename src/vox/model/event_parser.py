@@ -11,10 +11,11 @@ class SemanticEventStreamParser:
     {"type": "tool_call", "sequence": 1, "payload": {...}}
     """
 
-    def __init__(self, turn_id: str) -> None:
+    def __init__(self, turn_id: str, repair_sequences: bool = False) -> None:
         if not turn_id.strip():
             raise ValueError("turn_id must not be empty")
         self._turn_id = turn_id
+        self._repair_sequences = repair_sequences
         self._buffer = ""
         self._last_sequence = -1
 
@@ -48,7 +49,9 @@ class SemanticEventStreamParser:
         if not isinstance(sequence, int) or isinstance(sequence, bool):
             raise ValueError("planner event sequence must be an integer")
         if sequence <= self._last_sequence:
-            raise ValueError("planner event sequence must be strictly increasing")
+            if not self._repair_sequences:
+                raise ValueError("planner event sequence must be strictly increasing")
+            sequence = self._last_sequence + 1
         if not isinstance(payload, dict):
             raise ValueError("planner event payload must be an object")
 
@@ -75,4 +78,3 @@ class SemanticEventStreamParser:
                 isinstance(item, str) for item in dependencies
             ):
                 raise ValueError("speech_plan dependencies must be a string list")
-
