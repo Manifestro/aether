@@ -129,12 +129,21 @@ def generate_teacher_tokens(
         cfg_is_no_text = True
         cfg_is_no_prefix = True
 
+    # Mirrors moshi/run_tts.py exactly: `prefixes` (an audio continuation,
+    # via `get_prefix`) is only a thing for single-speaker models. For a
+    # multi_speaker model (this one), voice conditioning happens purely
+    # through `make_condition_attributes(voices, ...)` -- `get_voice_path`'s
+    # return value there is meant to be resolved to a cached speaker
+    # embedding (a `.safetensors` file), which is exactly what broke when
+    # the first version of this function called `get_prefix()` on it too
+    # (`get_prefix` expects actual audio, not an embedding cache).
     voice_name = None
-    prefixes = None
+    prefixes: Optional[List[Any]] = None
+    if not tts_model.multi_speaker:
+        prefixes = []
     if tts_model.multi_speaker:
         voice_name = resolve_default_voice(voice_repo)
         _update("voice_name", voice_name)
-        prefixes = []
 
     all_entries = []
     all_attributes = []
