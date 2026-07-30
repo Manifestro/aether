@@ -46,6 +46,13 @@ AETHER развивается одновременно в двух связан�
 Tempo/State Controller является общим слоем для обоих интерфейсов. В Text API он управляет
 ритмом semantic/text stream, а в Voice Head дополнительно управляет паузами, темпом и просодией.
 
+**Обновление (31 июля 2026).** Разделение Product/Research треков теперь физическое, не только
+концептуальное: Product Track (Text API) вынесен в отдельный репозиторий
+[`Manifestro/aether-api`](https://github.com/Manifestro/aether-api), который зависит от этого
+репозитория (`aether`, ядро) как от версионированного пакета (git-тег, не `main`). Ядро остаётся
+здесь и не содержит HTTP/FastAPI/продуктового кода. См. `HANDOFF.md` и
+`docs/reports/technical_report_02.md` §2.6.
+
 ---
 
 ## 2. Что уже доказано

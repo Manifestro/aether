@@ -8,6 +8,7 @@ __pycache__/
 # Experiment output
 artifacts/
 .logs/
+.claude
 *.log
 
 # Notebook runtime
