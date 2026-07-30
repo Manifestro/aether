@@ -29,7 +29,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from aether.audio.codec import MimiCodec, MimiCodecConfig
 from aether.experiments.colab_stage1 import environment_report, write_json
+from aether.experiments.colab_stage4 import write_wav
 from aether.model.llm_backbone import LLMBackboneConfig, SharedLLMBackbone
 from aether.model.voice_head import HiddenStateVoiceHead, HiddenStateVoiceHeadConfig
 from aether.training.datasets import HELD_OUT_PHRASES, PHRASES, TRAIN_PHRASES, Phrase
@@ -266,6 +268,40 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
             held_out_agreement[example.phrase_id] = matches / len(example.target_tokens)
         report["held_out_token_agreement"] = held_out_agreement
 
+        # Decode train-phrase audio so a human can actually listen, not just
+        # read a loss number. Two files per phrase, both restricted to
+        # codebook 0 only (matching what this Voice Head predicts):
+        #   - "predicted": this trained head's greedy output from hidden state.
+        #   - "teacher-codebook0-only": the teacher's own codebook-0 tokens,
+        #     decoded the same restricted way. This is the ceiling -- even
+        #     the *real* teacher sounds degraded through one codebook alone,
+        #     since Kyutai's TTS was designed around all 32. Comparing
+        #     against this ceiling, not against full-quality speech, is the
+        #     fair comparison for judging what this stage actually learned.
+        wav_dir = output_dir / "wav"
+        wav_dir.mkdir(parents=True, exist_ok=True)
+        mimi_codec = MimiCodec(
+            MimiCodecConfig(device=args.decode_device, num_codebooks=1, allow_download=args.allow_download)
+        )
+        mimi_codec.load()
+
+        train_wav_files: Dict[str, Dict[str, str]] = {}
+        for example in train_examples:
+            predicted = head._forward_greedy(example.hidden_state)  # noqa: SLF001 -- eval-only introspection
+            predicted_path = wav_dir / f"{example.phrase_id}-predicted.wav"
+            write_wav(predicted_path, mimi_codec.decode(predicted), int(mimi_codec.sample_rate))
+
+            teacher_path = wav_dir / f"{example.phrase_id}-teacher-codebook0-only.wav"
+            write_wav(
+                teacher_path, mimi_codec.decode(example.target_tokens), int(mimi_codec.sample_rate)
+            )
+            train_wav_files[example.phrase_id] = {
+                "predicted": str(predicted_path),
+                "teacher_codebook0_only": str(teacher_path),
+            }
+        report["train_wav_files"] = train_wav_files
+        write_json(output_dir / "report.json", report)
+
         checks = {
             "train_loss_decreased": loss_curve[-1] < loss_curve[0],
         }
@@ -298,6 +334,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tts-nq", type=int, default=32)
     parser.add_argument("--tts-device", default="cuda")
     parser.add_argument("--voice-head-device", default="cpu")
+    parser.add_argument("--decode-device", default="cpu")
     parser.add_argument("--vocab-size", type=int, default=2048)
     parser.add_argument("--max-audio-tokens", type=int, default=50)
     parser.add_argument("--epochs", type=int, default=300)
