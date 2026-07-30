@@ -1,5 +1,5 @@
 import asyncio
-from typing import AsyncIterator, Dict, List, Mapping
+from typing import Any, AsyncIterator, Dict, List, Mapping, Optional
 
 from aether.domain.audio import AudioChunk
 from aether.domain.chunks import SpeechChunk
@@ -111,11 +111,63 @@ class FakeVoiceHead:
         chunk: SpeechChunk,
         text: str,
         facts: Mapping[str, ToolResult],
+        hidden_state: Optional[Any] = None,
     ) -> AudioChunk:
+        del hidden_state  # this fake is deliberately text-conditioned
         self.calls.append(chunk.chunk_id)
         if self.latency_ms:
             await asyncio.sleep(self.latency_ms / 1000)
         tokens = tuple(ord(character) % 97 for character in text) or (0,)
+        return AudioChunk(
+            chunk_id=chunk.chunk_id,
+            codebook_index=0,
+            tokens=tokens,
+            frame_rate_hz=12.5,
+        )
+
+
+class HiddenStateSpeaker:
+    """Speaker whose spoken text is identical for every chunk, only the
+    (fake) hidden state differs.
+
+    Exists to prove, at the wiring level, that a hidden-state-conditioned
+    Voice Head really is driven by internal state and not by the decoded
+    string: if two chunks produce the same text but different hidden
+    states, their synthesized audio must differ.
+    """
+
+    def __init__(self, hidden_states: Mapping[str, Any], text: str = "identical text") -> None:
+        self._hidden_states = dict(hidden_states)
+        self._text = text
+        self.last_hidden_state: Optional[Any] = None
+
+    async def generate(self, chunk: SpeechChunk, facts: Mapping[str, ToolResult]) -> str:
+        self.last_hidden_state = self._hidden_states.get(chunk.chunk_id)
+        return self._text
+
+
+class FakeHiddenStateVoiceHead:
+    """Deterministic stand-in for a hidden-state-conditioned Voice Head."""
+
+    def __init__(self, latency_ms: int = 0) -> None:
+        self.latency_ms = latency_ms
+        self.calls: List[tuple] = []
+
+    async def synthesize(
+        self,
+        chunk: SpeechChunk,
+        text: str,
+        facts: Mapping[str, ToolResult],
+        hidden_state: Optional[Any] = None,
+    ) -> AudioChunk:
+        del text  # deliberately not used -- this is the point of the class
+        self.calls.append((chunk.chunk_id, hidden_state))
+        if self.latency_ms:
+            await asyncio.sleep(self.latency_ms / 1000)
+        if hidden_state is None:
+            tokens = (0,)
+        else:
+            tokens = tuple(int(value) % 97 for value in hidden_state) or (0,)
         return AudioChunk(
             chunk_id=chunk.chunk_id,
             codebook_index=0,

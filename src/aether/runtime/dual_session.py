@@ -132,7 +132,18 @@ class DualSessionRuntime:
                         continue
                     if self._voice_head is not None:
                         timeline.record("chunk_audio_generating", chunk_id=chunk.chunk_id)
-                        audio_chunk = await self._voice_head.synthesize(chunk, text, facts)
+                        # `last_hidden_state` is an optional side channel
+                        # (mirroring `LLMPlannerAdapter.last_parser`): a
+                        # Speaker that exposes it lets the Voice Head
+                        # condition on internal state instead of the
+                        # decoded text. Speakers that don't expose it (the
+                        # Stage 4 fakes, SequentialBaseline's speaker) leave
+                        # this None, and a text-conditioned Voice Head keeps
+                        # working exactly as before.
+                        hidden_state = getattr(self._speaker, "last_hidden_state", None)
+                        audio_chunk = await self._voice_head.synthesize(
+                            chunk, text, facts, hidden_state=hidden_state
+                        )
                         # Same race as the text path above: a replan may
                         # cancel this chunk while synthesis was in flight.
                         # The audio is discarded exactly like buffered text

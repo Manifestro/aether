@@ -23,6 +23,13 @@
 [`Manifestro/aether-api`](https://github.com/Manifestro/aether-api) вместе со своим notebook — это
 не то же самое, что Stage 4 выше (тот остаётся research-core).
 
+Отдельно, вне нумерации этапов: [`notebooks/aether_spike_moshi_teacher_colab.ipynb`](../notebooks/aether_spike_moshi_teacher_colab.ipynb)
+— разведка перед Stage 5 (обучение Voice Head на hidden state, учитель — Kyutai Moshi). Публичный
+пакет `moshi` — full-duplex conversational loop, а не TTS-вызов "текст → токены"; какой именно вызов
+даёт нам аудио-токены учителя для заданного текста, никем не проверено. Notebook не гадает конкретный
+API, а печатает его реальную поверхность (методы, сигнатуры) и пробует несколько кандидатов —
+результат нужен, чтобы спроектировать реальную интеграцию по фактам, а не по предположению.
+
 ## Перед запуском
 
 1. Запуш текущую ветку в GitHub.
