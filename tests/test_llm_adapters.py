@@ -1,7 +1,7 @@
 import unittest
 
 from aether.runtime.dual_session import DualSessionRuntime
-from aether.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
+from aether.model.llm_adapters import LLMPlannerAdapter, LLMSpeakerAdapter
 from aether.testing.fakes import FakeWeatherTool, ScriptedSharedBackend
 
 
@@ -21,7 +21,7 @@ def event_index(result, name, chunk_id=None):
     raise AssertionError(f"event not found: {name}")
 
 
-class QwenAdapterContractTests(unittest.IsolatedAsyncioTestCase):
+class LLMAdapterContractTests(unittest.IsolatedAsyncioTestCase):
     async def test_one_backend_serves_independent_planner_and_speaker_sessions(self) -> None:
         backend = ScriptedSharedBackend(
             {
@@ -31,8 +31,8 @@ class QwenAdapterContractTests(unittest.IsolatedAsyncioTestCase):
             chunk_size=7,
         )
         runtime = DualSessionRuntime(
-            QwenPlannerAdapter(backend, tools=["weather"]),
-            QwenSpeakerAdapter(backend),
+            LLMPlannerAdapter(backend, tools=["weather"]),
+            LLMSpeakerAdapter(backend),
             FakeWeatherTool(latency_ms=10),
         )
 
@@ -59,7 +59,7 @@ class QwenAdapterContractTests(unittest.IsolatedAsyncioTestCase):
             },
             chunk_size=5,
         )
-        planner = QwenPlannerAdapter(backend, tools=["weather"])
+        planner = LLMPlannerAdapter(backend, tools=["weather"])
 
         events = [event async for event in planner.plan("turn-stop", "Погода?")]
 
@@ -68,7 +68,7 @@ class QwenAdapterContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_system_prompt_declares_the_granted_tool_allowlist(self) -> None:
         backend = ScriptedSharedBackend({"planner": '{"type":"turn_complete","sequence":0,"payload":{}}\n'})
-        planner = QwenPlannerAdapter(backend, tools=["currency"])
+        planner = LLMPlannerAdapter(backend, tools=["currency"])
 
         _ = [event async for event in planner.plan("turn-tools", "Курс доллара?")]
 
@@ -77,7 +77,7 @@ class QwenAdapterContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_system_prompt_forbids_any_tool_when_none_granted(self) -> None:
         backend = ScriptedSharedBackend({"planner": '{"type":"turn_complete","sequence":0,"payload":{}}\n'})
-        planner = QwenPlannerAdapter(backend, tools=[])
+        planner = LLMPlannerAdapter(backend, tools=[])
 
         _ = [event async for event in planner.plan("turn-no-tools", "Привет!")]
 

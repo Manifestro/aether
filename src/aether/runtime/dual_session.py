@@ -22,7 +22,7 @@ class DualSessionRuntime:
     """Stage 1 runtime that overlaps planning, tool execution and speaking.
 
     This runtime still uses adapter-level Planner and Speaker implementations.
-    Later Qwen sessions can implement those protocols without changing the
+    Later LLM sessions can implement those protocols without changing the
     orchestration and dependency rules tested here.
     """
 

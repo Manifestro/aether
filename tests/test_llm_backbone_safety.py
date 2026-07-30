@@ -1,16 +1,16 @@
 import unittest
 
-from aether.model.qwen_backbone import QwenBackboneConfig, SharedQwenBackbone
+from aether.model.llm_backbone import LLMBackboneConfig, SharedLLMBackbone
 
 
-class QwenBackboneSafetyTests(unittest.TestCase):
+class LLMBackboneSafetyTests(unittest.TestCase):
     def test_backbone_is_lazy_and_downloads_are_disabled_by_default(self) -> None:
-        backbone = SharedQwenBackbone(QwenBackboneConfig("Qwen/Qwen3-1.7B"))
+        backbone = SharedLLMBackbone(LLMBackboneConfig("Qwen/Qwen3-1.7B"))
         self.assertFalse(backbone.loaded)
         self.assertFalse(backbone.config.allow_download)
 
     def test_stream_requires_explicit_load(self) -> None:
-        backbone = SharedQwenBackbone(QwenBackboneConfig("local/model/path"))
+        backbone = SharedLLMBackbone(LLMBackboneConfig("local/model/path"))
         self.assertFalse(backbone.loaded)
 
 

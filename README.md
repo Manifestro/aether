@@ -36,10 +36,10 @@ uv sync --extra dev --extra ml --extra audio
 
 The model-ready layer now includes:
 
-- a lazy `SharedQwenBackbone` with downloads disabled by default;
+- a lazy `SharedLLMBackbone` with downloads disabled by default;
 - independent Planner and Speaker session ids over one backend;
 - incremental JSONL semantic-event parsing and validation;
-- Qwen Planner/Speaker adapters;
+- LLM Planner/Speaker adapters (currently backed by Qwen3, swappable later);
 - an in-memory shared backend for dependency-free integration tests.
 
 No model is loaded by importing or constructing these adapters. Loading is an

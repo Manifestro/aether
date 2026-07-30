@@ -1,4 +1,4 @@
-"""Stage 2 interleaved Qwen KV-cache experiment with diagnostic artifacts."""
+"""Stage 2 interleaved LLM KV-cache experiment with diagnostic artifacts."""
 
 import argparse
 import asyncio
@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from aether.experiments.colab_stage1 import RecordingBackend, environment_report, write_json
-from aether.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
-from aether.model.qwen_backbone import QwenBackboneConfig, SharedQwenBackbone
-from aether.model.qwen_step_engine import QwenTokenStepEngine
+from aether.model.llm_adapters import LLMPlannerAdapter, LLMSpeakerAdapter
+from aether.model.llm_backbone import LLMBackboneConfig, SharedLLMBackbone
+from aether.model.llm_step_engine import LLMTokenStepEngine
 from aether.model.step_scheduler import InterleavedDecodeScheduler
 from aether.runtime.dual_session import DualSessionRuntime
 from aether.runtime.tool_executor import AllowlistToolExecutor
@@ -54,7 +54,7 @@ def first_absolute(events: list, name: str, role: Optional[str] = None) -> Optio
 
 async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
     report: Dict[str, Any] = {
-        "experiment": "qwen_stage2_interleaved_kv",
+        "experiment": "llm_stage2_interleaved_kv",
         "started_at": datetime.now(timezone.utc).isoformat(),
         "model": args.model,
         "request": args.request,
@@ -65,8 +65,8 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
     }
     write_json(output_dir / "report.json", report)
 
-    backbone = SharedQwenBackbone(
-        QwenBackboneConfig(
+    backbone = SharedLLMBackbone(
+        LLMBackboneConfig(
             model_path=args.model,
             device_map=args.device_map,
             dtype=args.dtype,
@@ -80,7 +80,7 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
         backbone.load()
         report["model_load_ms"] = (time.monotonic_ns() - load_started) / 1_000_000
 
-        engine = QwenTokenStepEngine(backbone)
+        engine = LLMTokenStepEngine(backbone)
         scheduler = InterleavedDecodeScheduler(
             engine,
             speaker_weight=args.speaker_weight,
@@ -88,8 +88,8 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
         )
         recorder = RecordingBackend(scheduler)
         runtime = DualSessionRuntime(
-            QwenPlannerAdapter(recorder, tools=["weather"]),
-            QwenSpeakerAdapter(recorder),
+            LLMPlannerAdapter(recorder, tools=["weather"]),
+            LLMSpeakerAdapter(recorder),
             AllowlistToolExecutor(["weather"], FakeWeatherTool(latency_ms=args.tool_latency_ms)),
         )
 

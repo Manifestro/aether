@@ -19,9 +19,9 @@ from typing import Any, Dict, List, Tuple
 
 from aether.experiments.colab_stage1 import RecordingBackend, environment_report, write_json
 from aether.experiments.colab_stage2 import first_absolute, runtime_trace, scheduler_trace
-from aether.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
-from aether.model.qwen_backbone import QwenBackboneConfig, SharedQwenBackbone
-from aether.model.qwen_step_engine import QwenTokenStepEngine
+from aether.model.llm_adapters import LLMPlannerAdapter, LLMSpeakerAdapter
+from aether.model.llm_backbone import LLMBackboneConfig, SharedLLMBackbone
+from aether.model.llm_step_engine import LLMTokenStepEngine
 from aether.model.step_scheduler import InterleavedDecodeScheduler
 from aether.runtime.dual_session import DualSessionRuntime
 from aether.runtime.tool_executor import AllowlistToolExecutor
@@ -128,21 +128,21 @@ def evaluate_run(result: Any, rt_trace: list, dec_trace: list) -> "tuple[Dict[st
 
 
 async def run_single(
-    backbone: SharedQwenBackbone,
+    backbone: SharedLLMBackbone,
     scenario: Scenario,
     latency_ms: int,
     speaker_weight: int,
     planner_weight: int,
 ) -> Dict[str, Any]:
-    engine = QwenTokenStepEngine(backbone)
+    engine = LLMTokenStepEngine(backbone)
     scheduler = InterleavedDecodeScheduler(
         engine, speaker_weight=speaker_weight, planner_weight=planner_weight
     )
     recorder = RecordingBackend(scheduler)
-    planner = QwenPlannerAdapter(recorder, tools=list(scenario.tools))
+    planner = LLMPlannerAdapter(recorder, tools=list(scenario.tools))
     runtime = DualSessionRuntime(
         planner,
-        QwenSpeakerAdapter(recorder),
+        LLMSpeakerAdapter(recorder),
         AllowlistToolExecutor(
             scenario.tools, FakeWeatherTool(latency_ms=latency_ms, fail=scenario.tool_fail)
         ),
@@ -205,7 +205,7 @@ def build_plan(latencies_ms: List[int]) -> List[Dict[str, Any]]:
 async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
     latencies_ms = [int(value) for value in args.tool_latency_ms.split(",") if value.strip()]
     report: Dict[str, Any] = {
-        "experiment": "qwen_stage3_latency_sweep_and_scenarios",
+        "experiment": "llm_stage3_latency_sweep_and_scenarios",
         "started_at": datetime.now(timezone.utc).isoformat(),
         "model": args.model,
         "tool_latencies_ms": latencies_ms,
@@ -217,8 +217,8 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
     }
     write_json(output_dir / "report.json", report)
 
-    backbone = SharedQwenBackbone(
-        QwenBackboneConfig(
+    backbone = SharedLLMBackbone(
+        LLMBackboneConfig(
             model_path=args.model,
             device_map=args.device_map,
             dtype=args.dtype,

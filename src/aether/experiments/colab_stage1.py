@@ -1,4 +1,4 @@
-"""Stage 1 Qwen smoke test with diagnostics suitable for a remote notebook.
+"""Stage 1 LLM smoke test with diagnostics suitable for a remote notebook.
 
 This module never downloads a model unless the caller passes --allow-download.
 It writes a report even when model loading, parsing or generation fails.
@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List
 
 from aether.model.generation import GenerationRequest, TextGenerationBackend
-from aether.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
-from aether.model.qwen_backbone import QwenBackboneConfig, SharedQwenBackbone
+from aether.model.llm_adapters import LLMPlannerAdapter, LLMSpeakerAdapter
+from aether.model.llm_backbone import LLMBackboneConfig, SharedLLMBackbone
 from aether.runtime.dual_session import DualSessionRuntime
 from aether.runtime.tool_executor import AllowlistToolExecutor
 from aether.testing.fakes import FakeWeatherTool
@@ -122,7 +122,7 @@ def write_json(path: Path, value: Any) -> None:
 
 async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
     report: Dict[str, Any] = {
-        "experiment": "qwen_stage1_weather_smoke",
+        "experiment": "llm_stage1_weather_smoke",
         "started_at": datetime.now(timezone.utc).isoformat(),
         "model": args.model,
         "request": args.request,
@@ -132,8 +132,8 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
     }
     write_json(output_dir / "report.json", report)
 
-    backbone = SharedQwenBackbone(
-        QwenBackboneConfig(
+    backbone = SharedLLMBackbone(
+        LLMBackboneConfig(
             model_path=args.model,
             device_map=args.device_map,
             dtype=args.dtype,
@@ -149,8 +149,8 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
         report["model_load_ms"] = (time.monotonic_ns() - load_started_ns) / 1_000_000
 
         runtime = DualSessionRuntime(
-            QwenPlannerAdapter(recorder, tools=["weather"]),
-            QwenSpeakerAdapter(recorder),
+            LLMPlannerAdapter(recorder, tools=["weather"]),
+            LLMSpeakerAdapter(recorder),
             AllowlistToolExecutor(["weather"], FakeWeatherTool(latency_ms=args.tool_latency_ms)),
         )
         run_started_ns = time.monotonic_ns()

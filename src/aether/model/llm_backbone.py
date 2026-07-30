@@ -7,7 +7,7 @@ from aether.model.generation import GenerationRequest
 
 
 @dataclass(frozen=True)
-class QwenBackboneConfig:
+class LLMBackboneConfig:
     model_path: str
     device_map: str = "auto"
     dtype: str = "auto"
@@ -26,8 +26,8 @@ def _next_or_none(iterator: Any) -> Optional[str]:
         return None
 
 
-class SharedQwenBackbone:
-    """Lazily loaded Qwen model shared by independent logical sessions.
+class SharedLLMBackbone:
+    """Lazily loaded LLM shared by independent logical sessions.
 
     The default configuration forbids network downloads. Importing this module,
     constructing the class and running unit tests do not import Transformers or
@@ -38,7 +38,7 @@ class SharedQwenBackbone:
     experiment; the public adapter contract will remain the same.
     """
 
-    def __init__(self, config: QwenBackboneConfig) -> None:
+    def __init__(self, config: LLMBackboneConfig) -> None:
         self.config = config
         self._tokenizer: Any = None
         self._model: Any = None
@@ -56,13 +56,13 @@ class SharedQwenBackbone:
     @property
     def tokenizer(self) -> Any:
         if self._tokenizer is None:
-            raise RuntimeError("Qwen backbone is not loaded")
+            raise RuntimeError("LLM backbone is not loaded")
         return self._tokenizer
 
     @property
     def model(self) -> Any:
         if self._model is None:
-            raise RuntimeError("Qwen backbone is not loaded")
+            raise RuntimeError("LLM backbone is not loaded")
         return self._model
 
     def load(self) -> None:
@@ -93,7 +93,7 @@ class SharedQwenBackbone:
 
     async def stream(self, request: GenerationRequest) -> AsyncIterator[str]:
         if not self.loaded:
-            raise RuntimeError("Qwen backbone is not loaded; call load() explicitly")
+            raise RuntimeError("LLM backbone is not loaded; call load() explicitly")
         if self._generate_lock is None:
             self._generate_lock = asyncio.Lock()
         self._session_requests[request.session_id] = (

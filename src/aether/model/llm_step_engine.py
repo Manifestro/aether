@@ -3,12 +3,12 @@ from dataclasses import dataclass, field
 from typing import Any, List
 
 from aether.model.generation import GenerationRequest
-from aether.model.qwen_backbone import SharedQwenBackbone
+from aether.model.llm_backbone import SharedLLMBackbone
 from aether.model.step_scheduler import DecodeStep
 
 
 @dataclass
-class QwenDecodeState:
+class LLMDecodeState:
     request: GenerationRequest
     input_ids: Any
     attention_mask: Any
@@ -18,15 +18,15 @@ class QwenDecodeState:
     closed: bool = False
 
 
-class QwenTokenStepEngine:
-    """One-token Qwen forward engine with a separate KV-cache per state."""
+class LLMTokenStepEngine:
+    """One-token LLM forward engine with a separate KV-cache per state."""
 
-    def __init__(self, backbone: SharedQwenBackbone) -> None:
+    def __init__(self, backbone: SharedLLMBackbone) -> None:
         if not backbone.loaded:
             raise RuntimeError("backbone must be explicitly loaded before creating step engine")
         self._backbone = backbone
 
-    async def create(self, request: GenerationRequest) -> QwenDecodeState:
+    async def create(self, request: GenerationRequest) -> LLMDecodeState:
         tokenizer = self._backbone.tokenizer
         model = self._backbone.model
         prompt = tokenizer.apply_chat_template(
@@ -36,22 +36,22 @@ class QwenTokenStepEngine:
             enable_thinking=self._backbone.config.enable_thinking,
         )
         encoded = tokenizer(prompt, return_tensors="pt")
-        return QwenDecodeState(
+        return LLMDecodeState(
             request=request,
             input_ids=encoded["input_ids"].to(model.device),
             attention_mask=encoded["attention_mask"].to(model.device),
         )
 
-    async def step(self, state: QwenDecodeState) -> DecodeStep:
+    async def step(self, state: LLMDecodeState) -> DecodeStep:
         if state.closed:
             raise RuntimeError("decode state is closed")
         return await asyncio.to_thread(self._step_sync, state)
 
-    async def close(self, state: QwenDecodeState) -> None:
+    async def close(self, state: LLMDecodeState) -> None:
         state.closed = True
         state.past_key_values = None
 
-    def _step_sync(self, state: QwenDecodeState) -> DecodeStep:
+    def _step_sync(self, state: LLMDecodeState) -> DecodeStep:
         import torch
 
         model = self._backbone.model

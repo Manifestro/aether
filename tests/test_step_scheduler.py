@@ -1,6 +1,6 @@
 import unittest
 
-from aether.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
+from aether.model.llm_adapters import LLMPlannerAdapter, LLMSpeakerAdapter
 from aether.model.step_scheduler import InterleavedDecodeScheduler
 from aether.runtime.dual_session import DualSessionRuntime
 from aether.testing.fakes import FakeTokenStepEngine, FakeWeatherTool
@@ -32,8 +32,8 @@ class InterleavedDecodeSchedulerTests(unittest.IsolatedAsyncioTestCase):
         )
         scheduler = InterleavedDecodeScheduler(engine)
         runtime = DualSessionRuntime(
-            QwenPlannerAdapter(scheduler, tools=["weather"]),
-            QwenSpeakerAdapter(scheduler),
+            LLMPlannerAdapter(scheduler, tools=["weather"]),
+            LLMSpeakerAdapter(scheduler),
             FakeWeatherTool(latency_ms=80),
         )
 

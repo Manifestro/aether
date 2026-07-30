@@ -41,7 +41,7 @@ Never invent tool results. Do not mention internal chunks, dependencies or JSON.
 """
 
 
-class QwenPlannerAdapter:
+class LLMPlannerAdapter:
     def __init__(
         self,
         backend: TextGenerationBackend,
@@ -91,7 +91,7 @@ class QwenPlannerAdapter:
                 return
 
 
-class QwenSpeakerAdapter:
+class LLMSpeakerAdapter:
     def __init__(
         self,
         backend: TextGenerationBackend,

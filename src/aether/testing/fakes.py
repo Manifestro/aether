@@ -8,7 +8,7 @@ from aether.model.step_scheduler import DecodeStep
 
 
 class WeatherPlanner:
-    """Deterministic stand-in for the future Qwen Planner adapter."""
+    """Deterministic stand-in for the future LLM Planner adapter."""
 
     async def plan(self, turn_id: str, request: str) -> AsyncIterator[SemanticEvent]:
         yield SemanticEvent(
@@ -91,7 +91,7 @@ class DeterministicSpeaker:
 
 
 class ScriptedSharedBackend:
-    """In-memory stand-in for one shared Qwen model with logical sessions."""
+    """In-memory stand-in for one shared LLM model with logical sessions."""
 
     def __init__(self, scripts: Mapping[str, str], chunk_size: int = 13) -> None:
         self.scripts = dict(scripts)
