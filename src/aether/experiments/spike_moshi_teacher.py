@@ -189,6 +189,60 @@ def run_spike(args: argparse.Namespace, output_dir: Path) -> Dict[str, Any]:
         tts_probe_results.append(probe)
     report["tts_checkpoint_candidates"] = tts_probe_results
 
+    # For any candidate whose tts_config actually populated, load its LM/Mimi
+    # specifically -- its `conditioners` (speaker_wavs, cfg) suggest a
+    # different call shape than moshiko's conversational LMGen, so its
+    # surface needs its own inspection rather than assuming it matches lm.
+    for probe, candidate in zip(tts_probe_results, tts_candidates):
+        if not probe.get("tts_config_populated"):
+            continue
+        key = candidate.replace("/", "_")
+        candidate_info = loaders.CheckpointInfo.from_hf_repo(candidate)
+
+        tts_mimi_attempt = try_attempt(
+            f"{candidate}.get_mimi",
+            lambda candidate_info=candidate_info: candidate_info.get_mimi(device=args.device),
+        )
+        report["attempts"].append(tts_mimi_attempt)
+
+        tts_lm_attempt = try_attempt(
+            f"{candidate}.get_moshi",
+            lambda candidate_info=candidate_info: candidate_info.get_moshi(device=args.device),
+        )
+        report["attempts"].append(tts_lm_attempt)
+        if tts_lm_attempt["succeeded"]:
+            tts_lm = candidate_info.get_moshi(device=args.device)
+            report[f"tts_lm_surface__{key}"] = describe_object(tts_lm)
+
+    # A dedicated Generator/TTSModel class is more likely to be the intended
+    # entry point than hand-rolling calls to the raw LMModel. Search the
+    # whole `moshi` package tree for anything shaped like one instead of
+    # assuming a name.
+    try:
+        import pkgutil
+
+        import moshi as moshi_pkg
+
+        matching_modules: List[str] = []
+        for module_info in pkgutil.walk_packages(moshi_pkg.__path__, prefix="moshi."):
+            name_lower = module_info.name.lower()
+            if any(marker in name_lower for marker in ("tts", "client", "generat", "script")):
+                matching_modules.append(module_info.name)
+        report["moshi_modules_matching_tts_client_generate"] = matching_modules
+
+        module_surfaces: Dict[str, Any] = {}
+        for module_name in matching_modules:
+            try:
+                import importlib
+
+                module = importlib.import_module(module_name)
+                module_surfaces[module_name] = describe_object(module)
+            except Exception as error:  # noqa: BLE001
+                module_surfaces[module_name] = {"import_error": repr(error)}
+        report["matching_module_surfaces"] = module_surfaces
+    except Exception as error:  # noqa: BLE001
+        report["moshi_package_scan_error"] = repr(error)
+
     report["status"] = "completed"
     report["conclusion_note"] = (
         "This spike does not conclude Moshi can or cannot serve as a teacher for "
