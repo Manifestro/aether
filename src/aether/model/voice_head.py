@@ -254,6 +254,42 @@ class HiddenStateVoiceHead:
         self._model.eval()
         self._model.to(self.config.device)
 
+    def parameters(self) -> Any:
+        if not self.loaded:
+            raise RuntimeError("HiddenStateVoiceHead is not loaded; call load() explicitly")
+        return self._model.parameters()
+
+    def train_mode(self, enabled: bool = True) -> None:
+        if not self.loaded:
+            raise RuntimeError("HiddenStateVoiceHead is not loaded; call load() explicitly")
+        self._model.train(enabled)
+
+    def compute_training_loss(self, hidden_state_batch: Any, target_tokens_batch: Any) -> Any:
+        """Teacher-forced next-token cross-entropy loss for one batch.
+
+        ``hidden_state_batch``: float tensor ``(B, hidden_state_dim)``.
+        ``target_tokens_batch``: long tensor ``(B, config.max_audio_tokens)``
+        — the teacher's codebook tokens, e.g. from ``TTSModel.generate()``.
+
+        The model input is the target shifted right by one position (start
+        token prepended, last target token dropped) — the standard
+        teacher-forcing setup, reusing the exact forward pass `synthesize`
+        already uses at inference time, just with a real target instead of
+        greedy self-generated tokens.
+        """
+        if not self.loaded:
+            raise RuntimeError("HiddenStateVoiceHead is not loaded; call load() explicitly")
+        torch = self._torch
+        batch_size = target_tokens_batch.shape[0]
+        start_column = torch.full(
+            (batch_size, 1), self._START_TOKEN, dtype=torch.long, device=target_tokens_batch.device
+        )
+        audio_input = torch.cat([start_column, target_tokens_batch[:, :-1]], dim=1)
+        logits = self._model(hidden_state_batch, audio_input)
+        return torch.nn.functional.cross_entropy(
+            logits.reshape(-1, self.config.vocab_size), target_tokens_batch.reshape(-1)
+        )
+
     def _forward_greedy(self, hidden_state: Any) -> list:
         torch = self._torch
         cfg = self.config

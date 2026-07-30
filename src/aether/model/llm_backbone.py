@@ -65,6 +65,34 @@ class SharedLLMBackbone:
             raise RuntimeError("LLM backbone is not loaded")
         return self._model
 
+    @property
+    def hidden_size(self) -> int:
+        if self._model is None:
+            raise RuntimeError("LLM backbone is not loaded")
+        return int(self._model.config.hidden_size)
+
+    def encode_hidden_state(self, text: str) -> "list[float]":
+        """Mean-pooled last-layer hidden state for ``text``, as a plain list.
+
+        This is a plain forward pass with ``output_hidden_states=True`` —
+        deliberately separate from ``stream()``'s threaded ``generate()``
+        call, so this addition cannot affect the already-tested streaming
+        decode path. It exists for Stage 5 (Level B hidden-state bridge):
+        given the same text the Speaker produced, recover the internal
+        state that produced it, to condition a Voice Head on state instead
+        of the decoded string.
+        """
+        if not self.loaded:
+            raise RuntimeError("LLM backbone is not loaded; call load() explicitly")
+        import torch
+
+        inputs = self._tokenizer(text, return_tensors="pt").to(self._model.device)
+        with torch.no_grad():
+            outputs = self._model(**inputs, output_hidden_states=True)
+        last_hidden = outputs.hidden_states[-1]  # (1, seq_len, hidden_size)
+        pooled = last_hidden.mean(dim=1).squeeze(0)
+        return pooled.float().cpu().tolist()
+
     def load(self) -> None:
         if self.loaded:
             return

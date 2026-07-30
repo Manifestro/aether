@@ -18,6 +18,13 @@
    раньше подтверждённого факта, буферизованный синтез корректно отменяется при replan). Качество
    звучания, просодия и эмоции здесь не оцениваются и не являются критерием выхода — см.
    `aether/model/voice_head.py` и `aether/experiments/colab_stage4.py`.
+5. [`notebooks/aether_stage5_hidden_state_voice_colab.ipynb`](../notebooks/aether_stage5_hidden_state_voice_colab.ipynb) —
+   Level B (spec.md §10): обучает `HiddenStateVoiceHead` предсказывать Mimi codebook-0 токены из
+   **hidden state Qwen3**, не из текста, на ~20 английских фразах, с `kyutai/tts-1.6b-en_fr` как
+   учителем (реальный text-to-speech чекпоинт, вызов подтверждён исходным кодом `moshi/run_tts.py`,
+   не догадкой). Критерий — train loss падает от случайного старта
+   (`checks.train_loss_decreased`), 4 отложенные фразы — мягкое наблюдение, не статистически
+   значимая проверка обобщения. Качество и естественность речи вне области этого прогона.
 
 Продуктовый API (`aether_api`, HTTP/FastAPI) переехал в отдельный репозиторий
 [`Manifestro/aether-api`](https://github.com/Manifestro/aether-api) вместе со своим notebook — это
