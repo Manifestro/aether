@@ -2,7 +2,7 @@ import json
 from typing import AsyncIterator, Mapping
 
 from vox.domain.chunks import SpeechChunk
-from vox.domain.events import SemanticEvent, ToolResult
+from vox.domain.events import EventKind, SemanticEvent, ToolResult
 from vox.model.event_parser import SemanticEventStreamParser
 from vox.model.generation import GenerationRequest, GenerationSettings, TextGenerationBackend
 
@@ -53,8 +53,12 @@ class QwenPlannerAdapter:
         async for text in self._backend.stream(generation):
             for event in parser.feed(text):
                 yield event
+                if event.kind is EventKind.TURN_COMPLETE:
+                    return
         for event in parser.finish():
             yield event
+            if event.kind is EventKind.TURN_COMPLETE:
+                return
 
 
 class QwenSpeakerAdapter:

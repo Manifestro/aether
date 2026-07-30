@@ -52,7 +52,21 @@ class QwenAdapterContractTests(unittest.IsolatedAsyncioTestCase):
             event_index(result, "chunk_generating", "answer"),
         )
 
+    async def test_planner_stops_at_turn_complete_and_ignores_trailing_garbage(self) -> None:
+        backend = ScriptedSharedBackend(
+            {
+                "planner": PLANNER_SCRIPT + '{"unfinished',
+                "speaker": "Готово.",
+            },
+            chunk_size=5,
+        )
+        planner = QwenPlannerAdapter(backend)
+
+        events = [event async for event in planner.plan("turn-stop", "Погода?")]
+
+        self.assertEqual(events[-1].kind.value, "turn_complete")
+        self.assertEqual(len(events), 5)
+
 
 if __name__ == "__main__":
     unittest.main()
-

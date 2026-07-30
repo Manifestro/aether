@@ -89,7 +89,13 @@ class SharedQwenBackbone:
         )
 
         async with self._generate_lock:
-            from transformers import TextIteratorStreamer
+            from transformers import StoppingCriteria, StoppingCriteriaList, TextIteratorStreamer
+
+            stop_requested = threading.Event()
+
+            class StopWhenRequested(StoppingCriteria):
+                def __call__(self, input_ids: Any, scores: Any, **kwargs: Any) -> bool:
+                    return stop_requested.is_set()
 
             prompt = self._tokenizer.apply_chat_template(
                 list(request.messages),
@@ -108,6 +114,7 @@ class SharedQwenBackbone:
                 streamer=streamer,
                 max_new_tokens=request.settings.max_new_tokens,
                 do_sample=request.settings.temperature > 0,
+                stopping_criteria=StoppingCriteriaList([StopWhenRequested()]),
             )
             if request.settings.temperature > 0:
                 kwargs.update(
@@ -119,9 +126,12 @@ class SharedQwenBackbone:
             worker.start()
             iterator = iter(streamer)
             loop = asyncio.get_running_loop()
-            while True:
-                piece = await loop.run_in_executor(None, _next_or_none, iterator)
-                if piece is None:
-                    break
-                yield piece
-            worker.join()
+            try:
+                while True:
+                    piece = await loop.run_in_executor(None, _next_or_none, iterator)
+                    if piece is None:
+                        break
+                    yield piece
+            finally:
+                stop_requested.set()
+                worker.join()
