@@ -1,7 +1,7 @@
 import unittest
 
-from vox.domain.events import EventKind
-from vox.model.event_parser import SemanticEventStreamParser
+from aether.domain.events import EventKind
+from aether.model.event_parser import SemanticEventStreamParser
 
 
 class SemanticEventStreamParserTests(unittest.TestCase):

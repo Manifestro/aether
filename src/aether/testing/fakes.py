@@ -1,10 +1,10 @@
 import asyncio
 from typing import AsyncIterator, Dict, List, Mapping
 
-from vox.domain.chunks import SpeechChunk
-from vox.domain.events import EventKind, SemanticEvent, ToolCall, ToolResult
-from vox.model.generation import GenerationRequest
-from vox.model.step_scheduler import DecodeStep
+from aether.domain.chunks import SpeechChunk
+from aether.domain.events import EventKind, SemanticEvent, ToolCall, ToolResult
+from aether.model.generation import GenerationRequest
+from aether.model.step_scheduler import DecodeStep
 
 
 class WeatherPlanner:

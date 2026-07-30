@@ -1,8 +1,8 @@
-# VOX-SYNAPSE Technical Report 01
+# AETHER Technical Report 01
 
 ## Predictive Dual-Stream Tool Use with Interleaved LLM Decoding
 
-**Project:** VOX-SYNAPSE  
+**Project:** AETHER
 **Organization:** Manifestro  
 **Authors:** Manifestro Research Team;
 **Report date:** 30 July 2026  
@@ -12,11 +12,11 @@
 
 ## Abstract
 
-VOX-SYNAPSE is a research architecture for voice agents in which semantic planning and speech generation proceed as two coordinated streams. The semantic stream can initiate an external tool call while the speech stream begins a safe, tool-independent response. When the tool result arrives, the speech stream continues with facts that were previously blocked by a dependency boundary.
+AETHER is a research architecture for voice agents in which semantic planning and speech generation proceed as two coordinated streams. The semantic stream can initiate an external tool call while the speech stream begins a safe, tool-independent response. When the tool result arrives, the speech stream continues with facts that were previously blocked by a dependency boundary.
 
 This report documents the first experiment using an open Qwen3-1.7B language model on an NVIDIA A100 80 GB GPU. The system loaded one shared model and maintained independent logical Planner and Speaker decoding sessions with separate decode state. An interleaved token scheduler alternated model steps between the sessions.
 
-In the weather scenario, the first Speaker token appeared approximately **1.22 seconds before the MCP result completed**. The factual speech chunk started only after the tool result was available. This is the first experimental confirmation of the central VOX-SYNAPSE hypothesis on a real open-weight model.
+In the weather scenario, the first Speaker token appeared approximately **1.22 seconds before the MCP result completed**. The factual speech chunk started only after the tool result was available. This is the first experimental confirmation of the central AETHER hypothesis on a real open-weight model.
 
 The experiment does not yet demonstrate native audio generation, end-to-end speech input, or physically simultaneous CUDA execution. It establishes the semantic/action lookahead and commitment-control mechanism required for those later stages.
 
@@ -183,7 +183,7 @@ The final result was:
 
 ## 6. Interpretation
 
-The experiment validates the architectural core of VOX-SYNAPSE at the semantic orchestration level. The model does not need to finish planning the whole response before the system can act. Once a usable tool call and safe speech plan are available, the scheduler allows the Speaker stream to progress while the external operation remains pending.
+The experiment validates the architectural core of AETHER at the semantic orchestration level. The model does not need to finish planning the whole response before the system can act. Once a usable tool call and safe speech plan are available, the scheduler allows the Speaker stream to progress while the external operation remains pending.
 
 The result is stronger than a conventional asynchronous application wrapper because the two streams share the same model weights while maintaining independent decoding state. The scheduler controls model progress at token-step granularity rather than waiting for a complete Planner response.
 
@@ -249,18 +249,18 @@ The current experiment starts from text. Streaming audio input, VAD and barge-in
 
 ## 9. Reproducibility
 
-The experiment is implemented in the VOX-SYNAPSE repository. The relevant components are:
+The experiment is implemented in the AETHER repository. The relevant components are:
 
-- `src/vox/model/step_scheduler.py` — interleaved scheduler;
-- `src/vox/model/qwen_step_engine.py` — one-token Qwen engine with per-session KV state;
-- `src/vox/runtime/dual_session.py` — Planner/MCP/Speaker runtime;
-- `src/vox/experiments/colab_stage2.py` — diagnostic runner;
-- `notebooks/vox_stage2_colab.ipynb` — remote experiment notebook;
+- `src/aether/model/step_scheduler.py` — interleaved scheduler;
+- `src/aether/model/qwen_step_engine.py` — one-token Qwen engine with per-session KV state;
+- `src/aether/runtime/dual_session.py` — Planner/MCP/Speaker runtime;
+- `src/aether/experiments/colab_stage2.py` — diagnostic runner;
+- `notebooks/aether_stage2_colab.ipynb` — remote experiment notebook;
 - `tests/test_step_scheduler.py` — dependency-free scheduler tests.
 
 The development suite currently contains 21 tests and passes without model weights. The remote report used for this document is stored locally as:
 
-`.logs/vox-colab-stage2-final/report.json`
+`.logs/aether-colab-stage2-final/report.json`
 
 Model caches, logs and weight files are excluded from version control.
 
@@ -268,7 +268,7 @@ Model caches, logs and weight files are excluded from version control.
 
 ## 10. Conclusion
 
-The first real-model experiment supports the VOX-SYNAPSE thesis:
+The first real-model experiment supports the AETHER thesis:
 
 > A voice agent can initiate action and begin a safe response before the external information required for the final answer is available.
 

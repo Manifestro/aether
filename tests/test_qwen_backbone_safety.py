@@ -1,6 +1,6 @@
 import unittest
 
-from vox.model.qwen_backbone import QwenBackboneConfig, SharedQwenBackbone
+from aether.model.qwen_backbone import QwenBackboneConfig, SharedQwenBackbone
 
 
 class QwenBackboneSafetyTests(unittest.TestCase):

@@ -1,7 +1,7 @@
 import json
 from typing import Any, Dict, List
 
-from vox.domain.events import EventKind, SemanticEvent
+from aether.domain.events import EventKind, SemanticEvent
 
 
 class SemanticEventStreamParser:

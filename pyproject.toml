@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "vox-synapse"
+name = "aether"
 version = "0.1.0"
 description = "Research runtime for predictive dual-stream speech and MCP orchestration"
 readme = "README.md"
@@ -33,7 +33,7 @@ audio = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/vox"]
+packages = ["src/aether"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

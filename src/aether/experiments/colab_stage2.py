@@ -9,13 +9,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from vox.experiments.colab_stage1 import RecordingBackend, environment_report, write_json
-from vox.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
-from vox.model.qwen_backbone import QwenBackboneConfig, SharedQwenBackbone
-from vox.model.qwen_step_engine import QwenTokenStepEngine
-from vox.model.step_scheduler import InterleavedDecodeScheduler
-from vox.runtime.dual_session import DualSessionRuntime
-from vox.testing.fakes import FakeWeatherTool
+from aether.experiments.colab_stage1 import RecordingBackend, environment_report, write_json
+from aether.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
+from aether.model.qwen_backbone import QwenBackboneConfig, SharedQwenBackbone
+from aether.model.qwen_step_engine import QwenTokenStepEngine
+from aether.model.step_scheduler import InterleavedDecodeScheduler
+from aether.runtime.dual_session import DualSessionRuntime
+from aether.testing.fakes import FakeWeatherTool
 
 
 def runtime_trace(result: Any) -> list:
@@ -177,8 +177,8 @@ def main() -> int:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     exit_code = asyncio.run(run_experiment(args, output_dir))
-    print(f"VOX_STAGE2_STATUS={'PASSED' if exit_code == 0 else 'FAILED'}")
-    print(f"VOX_STAGE2_REPORT={output_dir / 'report.json'}")
+    print(f"AETHER_STAGE2_STATUS={'PASSED' if exit_code == 0 else 'FAILED'}")
+    print(f"AETHER_STAGE2_REPORT={output_dir / 'report.json'}")
     return exit_code
 
 

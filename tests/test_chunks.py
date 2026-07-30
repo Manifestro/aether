@@ -1,6 +1,6 @@
 import unittest
 
-from vox.domain.chunks import ChunkState, SpeechChunk
+from aether.domain.chunks import ChunkState, SpeechChunk
 
 
 class SpeechChunkTests(unittest.TestCase):

@@ -3,7 +3,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, Optional
 
-from vox.model.generation import GenerationRequest
+from aether.model.generation import GenerationRequest
 
 
 @dataclass(frozen=True)

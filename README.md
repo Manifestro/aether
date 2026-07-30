@@ -1,4 +1,4 @@
-# VOX-SYNAPSE
+# AETHER
 
 Research code for the predictive dual-stream architecture described in
 [`spec.md`](spec.md).

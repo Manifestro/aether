@@ -1,9 +1,9 @@
 import unittest
 
-from vox.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
-from vox.model.step_scheduler import InterleavedDecodeScheduler
-from vox.runtime.dual_session import DualSessionRuntime
-from vox.testing.fakes import FakeTokenStepEngine, FakeWeatherTool
+from aether.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
+from aether.model.step_scheduler import InterleavedDecodeScheduler
+from aether.runtime.dual_session import DualSessionRuntime
+from aether.testing.fakes import FakeTokenStepEngine, FakeWeatherTool
 
 
 PLANNER_SCRIPT = """{"type":"intent","sequence":0,"payload":{"name":"get_weather"}}
@@ -61,7 +61,7 @@ class InterleavedDecodeSchedulerTests(unittest.IsolatedAsyncioTestCase):
         )
         scheduler = InterleavedDecodeScheduler(engine, speaker_weight=3, planner_weight=2)
 
-        from vox.model.generation import GenerationRequest
+        from aether.model.generation import GenerationRequest
 
         async def consume(role):
             request = GenerationRequest(

@@ -1,8 +1,8 @@
 import unittest
 
-from vox.runtime.dual_session import DualSessionRuntime
-from vox.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
-from vox.testing.fakes import FakeWeatherTool, ScriptedSharedBackend
+from aether.runtime.dual_session import DualSessionRuntime
+from aether.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
+from aether.testing.fakes import FakeWeatherTool, ScriptedSharedBackend
 
 
 PLANNER_SCRIPT = """{"type":"intent","sequence":0,"payload":{"name":"get_weather"}}

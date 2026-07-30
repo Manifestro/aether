@@ -1,334 +1,348 @@
-# VOX-SYNAPSE — Handoff 1
+# AETHER — Handoff 1 (API Track)
 
-> **Актуализация:** после первоначального handoff был завершён model-ready adapter layer. Текущий статус и новый следующий шаг перечислены ниже. Эта секция имеет приоритет над историческим разделом «Следующий конкретный milestone».
+**Organization:** Manifestro
+**Current route:** semantic core → Text API → Web Chat
+**Research route:** native Voice Head remains parallel, not blocking the API
 
-### Выполнено после первоначального handoff
+Этот handoff обновлён после успешного Stage 2. Следующий агент должен начинать с продуктового API-слоя, а не с повторного подключения Qwen или Voice Head.
 
-- добавлен provider-neutral `TextGenerationBackend`;
-- добавлены `GenerationRequest` и `GenerationSettings`;
-- реализован incremental JSONL parser для semantic events;
-- parser валидирует типы событий, возрастающий `sequence`, `tool_call` и `speech_plan` payload;
-- реализованы `QwenPlannerAdapter` и `QwenSpeakerAdapter`;
-- реализован ленивый `SharedQwenBackbone`;
-- Transformers/PyTorch импортируются только внутри явного `load()`;
-- `allow_download=False` и `local_files_only=True` используются по умолчанию;
-- один backend обслуживает независимые `planner:<turn_id>` и `speaker:<turn_id>` сессии;
-- добавлен `ScriptedSharedBackend`, проверяющий весь model contract без весов и ML-зависимостей;
-- `SpeechChunk` теперь хранит `turn_id` для изоляции Speaker-сессий;
-- полный набор содержит **17 dependency-free tests**, все проходят.
+---
 
-Новые ключевые файлы:
+## 1. Что доказано
+
+На Qwen3-1.7B и NVIDIA A100 был запущен interleaved dual-session runtime:
 
 ```text
-src/vox/model/generation.py
-src/vox/model/event_parser.py
-src/vox/model/qwen_adapters.py
-src/vox/model/qwen_backbone.py
-tests/test_event_parser.py
-tests/test_qwen_adapters.py
-tests/test_qwen_backbone_safety.py
+MCP started:          2220 ms
+Speaker first token:  4003 ms
+MCP completed:        5221 ms
+Factual chunk start:  5980 ms
 ```
 
-### Актуальный следующий milestone
+Speaker начал безопасный ответ примерно за **1218 мс до MCP result**. Factual chunk появился только после получения результата.
 
-В среде, где разрешены веса, выполнить offline smoke test `SharedQwenBackbone` с Qwen3-1.7B и записать фактический model output. Затем, не меняя adapter contract:
-
-1. исправить реальные отклонения JSONL через prompt/parser/constrained decoding;
-2. добавить JSONL trace writer;
-3. отделить model loading notebook/script от библиотечного кода;
-4. измерить VRAM и latency одного Planner и одного Speaker запроса;
-5. заменить сериализованный `generate` lock на экспериментальный decode scheduler с двумя KV-cache;
-6. сравнить sequential model baseline и dual-session model runtime;
-7. сохранить fake tests полностью независимыми от модели и сети.
-
-Текущий `SharedQwenBackbone` намеренно сериализует Hugging Face `generate` вызовы. Он проверяет загрузку одного набора весов и adapter contract, но ещё не обеспечивает истинное конкурентное декодирование на GPU. Это следующая исследовательская граница.
-
-## Назначение документа
-
-Этот файл предназначен для следующего агента, который продолжит проект с текущего состояния. Сначала прочитай:
-
-1. [`spec.md`](spec.md) — полная исследовательская спецификация v0.3;
-2. [`invest_pitch.md`](invest_pitch.md) — краткое позиционирование идеи;
-3. этот handoff;
-4. код и тесты, перечисленные ниже.
-
-Не заменяй исследовательское ядро связкой закрытых LLM/ASR/TTS API. Цель проекта — проверить управляемую нами dual-stream архитектуру на открытых весах.
-
----
-
-## Идея проекта
-
-VOX-SYNAPSE проверяет гипотезу, что один открытый LLM backbone может обслуживать два параллельных логических потока:
-
-- **Planner** опережает голос, определяет намерение, строит semantic events и рано запускает MCP;
-- **Speaker** начинает с безопасных фрагментов и использует результат MCP только в ещё не зафиксированной части ответа.
-
-Ключевой эффект:
-
-> Агент начинает действовать раньше, чем заканчивает говорить.
-
-Долгосрочно Speaker должен генерировать нативные токены аудиокодека Mimi. Текущий этап изолирует и доказывает orchestration, event ordering и factual commitment до подключения модели и аудио.
-
----
-
-## Зафиксированные архитектурные решения
-
-1. Основной backbone-кандидат: **Qwen3-1.7B**.
-2. Контрольный апгрейд при недостаточном качестве: **Qwen3-4B**.
-3. Один набор весов должен быть загружен один раз.
-4. Planner и Speaker имеют независимые prompts, token sequences и KV-cache.
-5. Первичный канал между потоками — типизированные structured semantic events.
-6. После event baseline исследуется hidden-state projector + gated cross-attention.
-7. MCP и factual commitment не должны зависеть только от непрозрачных embeddings.
-8. Основной аудиокодек позднего этапа — Kyutai Mimi.
-9. Язык проекта — Python; целевой runtime Python 3.12.
-10. Закрытые API допустимы только как внешний baseline/разметчик, не как доказательство концепции.
-
----
-
-## Что уже реализовано
-
-### Доменное ядро
-
-- `SemanticEvent` и `EventKind`;
-- типы `ToolCall` и `ToolResult`;
-- `SpeechChunk` и строгая машина состояний;
-- dependency resolution;
-- запрет отмены после `COMMITTED`;
-- append-only монотонный `Timeline`;
-- измерение интервалов между trace events.
-
-### Adapter protocols
-
-В `src/vox/model/protocols.py` определены:
-
-- `Planner`;
-- `Speaker`;
-- `ToolExecutor`;
-- `EventValidator`.
-
-Реальный Qwen adapter должен реализовать эти контракты либо минимально расширить их без протекания Transformers-деталей в domain/runtime.
-
-### SequentialBaseline — Этап 0
-
-Файл: `src/vox/runtime/sequential.py`.
-
-Порядок выполнения:
+Финальный ответ:
 
 ```text
-Planner completes/tool executes → Speaker starts
+Проверка погоды началась, результат ещё ожидается.
+В городе Алматы сейчас дождь, температура 24 градуса Цельсия.
 ```
 
-Это контрольный вариант для сравнения порядка событий и latency.
+Отчёт: [`technical_report_01.md`](technical_report_01.md).
 
-### DualSessionRuntime — первая часть Этапа 1
+Это доказывает semantic/action lookahead. Ещё не доказаны native audio, streaming input, barge-in и production API.
 
-Файл: `src/vox/runtime/dual_session.py`.
+---
 
-Реализовано:
+## 2. Главный следующий результат
 
-- Planner потоково выдаёт semantic events;
-- `tool_call` немедленно создаёт отдельную `asyncio.Task`;
-- ready chunks поступают в bounded `asyncio.Queue`;
-- Speaker работает конкурентно с MCP;
-- зависимые chunks остаются `BLOCKED`;
-- успешный tool result разблокирует зависимости;
-- tool exception конвертируется в наблюдаемый failed `ToolResult`;
-- после ошибки зависимый фрагмент не генерируется и не коммитится;
-- сохраняется полная временная трасса;
-- при исключении Planner дочерние tool/Speaker задачи отменяются.
+Сделать публично пригодный Text API поверх уже работающего `DualSessionRuntime`.
 
-Доказанный порядок для медленного weather tool:
+```text
+Web Chat ─┐
+          ├──► Text API ─► Planner ─► MCP ─► Text Speaker
+Developers┘
+```
+
+API должен показывать не chain-of-thought, а безопасный поток событий:
 
 ```text
 tool_started
-safe lead-in generated/played
+response.safe_delta
 tool_completed
-tool-dependent answer generated/played
+response.delta
+turn_completed
 ```
 
-В sequential baseline:
-
-```text
-tool_started
-tool_completed
-speaker_started
-```
-
-Это первое локальное доказательство overlap, пока на deterministic fake-компонентах.
-
-### Детерминированные компоненты
-
-Файл: `src/vox/testing/fakes.py`.
-
-- `WeatherPlanner`;
-- `FakeWeatherTool` с latency/error режимами;
-- `DeterministicSpeaker`.
-
-Они нужны как стабильные fixtures. Не удаляй их после подключения Qwen: реальные adapters должны сравниваться с детерминированным runtime baseline.
+Позже `response.safe_delta`/`response.delta` заменяются или дополняются audio chunks. Planner, MCP, dependencies, revisions, scheduler и commit horizon сохраняются.
 
 ---
 
-## Текущая структура
+## 3. Текущая архитектура
+
+### Domain
+
+- `SemanticEvent`, `EventKind`;
+- `ToolCall`, `ToolResult`;
+- `SpeechChunk` и строгие состояния;
+- dependencies и factual commitment;
+- монотонный `Timeline`.
+
+### Runtime
+
+- `SequentialBaseline` — контрольный последовательный pipeline;
+- `DualSessionRuntime` — Planner/MCP/Speaker overlap;
+- `InterleavedDecodeScheduler` — token-step scheduling;
+- нормальный `turn_complete`, cancellation и revision boundaries ещё нужно унифицировать в API telemetry.
+
+### Model adapters
+
+- `QwenPlannerAdapter`;
+- `QwenSpeakerAdapter`;
+- `SharedQwenBackbone` с lazy load;
+- `QwenTokenStepEngine` с отдельным decode state/KV-cache;
+- `SemanticEventStreamParser`;
+- `ScriptedSharedBackend` и `FakeTokenStepEngine` для тестов без весов.
+
+### MCP
+
+Пока используются deterministic fake tools. Официальный MCP client подключается следующим отдельным adapter-слоем; domain/runtime не должны зависеть от конкретного транспорта.
+
+---
+
+## 4. Структура проекта
 
 ```text
-vox/
-├── README.md
+aether/
 ├── spec.md
+├── plan.md
 ├── invest_pitch.md
+├── technical_report_01.md
 ├── handoff-1.md
+├── COLAB.md
 ├── pyproject.toml
 ├── configs/
-│   └── experiments/
-│       └── sequential_weather.yaml
-├── src/vox/
-│   ├── domain/
-│   │   ├── chunks.py
-│   │   ├── events.py
-│   │   └── timeline.py
 │   ├── model/
-│   │   └── protocols.py
+│   └── experiments/
+├── notebooks/
+│   ├── aether_stage1_colab.ipynb
+│   └── aether_stage2_colab.ipynb
+├── src/aether/
+│   ├── domain/
+│   ├── model/
 │   ├── runtime/
-│   │   ├── sequential.py
-│   │   └── dual_session.py
-│   └── testing/
-│       └── fakes.py
+│   ├── testing/
+│   └── experiments/
 └── tests/
-    ├── test_chunks.py
-    ├── test_dual_session.py
-    ├── test_sequential_weather.py
-    └── test_timeline.py
 ```
 
 ---
 
-## Проверка текущего состояния
+## 5. Проверка
 
-Локальный системный Python в исходной среде — 3.9.6, хотя целевая версия проекта в `pyproject.toml` — Python 3.12. Доменное ядро намеренно пока совместимо с 3.9, чтобы его можно было проверить без установки зависимостей.
-
-Запуск dependency-free тестов:
+Dependency-free локальная проверка:
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-Ожидаемый актуальный результат:
+Актуальный результат после scheduler и sequence-repair тестов:
 
 ```text
-Ran 17 tests
+Ran 21 tests
 OK
 ```
 
-Проверка компиляции в ограниченной macOS-среде:
+Также проверяются:
 
 ```bash
-PYTHONPYCACHEPREFIX=/tmp/vox-pycache \
+PYTHONPYCACHEPREFIX=/tmp/aether-pycache \
 PYTHONPATH=src \
 python3 -m compileall -q src tests
+
+python3 -m json.tool notebooks/aether_stage2_colab.ipynb >/dev/null
+
+git diff --check
 ```
 
-Обычная `compileall` без `PYTHONPYCACHEPREFIX` может пытаться писать в системный каталог `~/Library/Caches`, недоступный sandbox. Это не ошибка кода.
+На development machine не скачивать модели, weights или ML dependencies. Для настоящего Qwen smoke test использовать отдельную ML-среду и `notebooks/aether_stage2_colab.ipynb`.
 
-Для целевой среды:
+---
+
+## 6. Product Track — следующий milestone
+
+### 6.1. API domain contract
+
+Создать API-independent service layer, который преобразует внутренние runtime events в публичные события.
+
+Предлагаемые события:
+
+```text
+turn.started
+plan.tool_started
+response.safe_delta
+tool.completed
+response.delta
+turn.completed
+turn.failed
+```
+
+Каждое событие должно содержать:
+
+- `turn_id`;
+- `sequence`;
+- `timestamp_ms`;
+- `type`;
+- `payload`;
+- `revision_id` при изменении плана.
+
+Не публиковать hidden states, chain-of-thought или внутренние prompts.
+
+### 6.2. Text API
+
+Основной endpoint:
+
+```http
+POST /v1/turns
+```
+
+Request:
+
+```json
+{
+  "message": "Какая погода в Алматы?",
+  "tools": ["weather"],
+  "stream": true
+}
+```
+
+Response transport:
+
+- SSE для первого публичного preview;
+- WebSocket позже для bidirectional audio и barge-in.
+
+Пример SSE:
+
+```text
+event: plan.tool_started
+data: {"tool":"weather","arguments":{"location":"Almaty"}}
+
+event: response.safe_delta
+data: {"text":"Проверка погоды началась..."}
+
+event: tool.completed
+data: {"temperature_c":24,"condition":"rain"}
+
+event: response.delta
+data: {"text":"Ожидается дождь, зонт лучше взять."}
+
+event: turn.completed
+data: {}
+```
+
+### 6.3. API security
+
+Первый public preview должен иметь:
+
+- API keys;
+- per-key rate limit;
+- daily quota;
+- max input/context length;
+- tool timeout;
+- max concurrent turns;
+- structured error responses;
+- usage counters;
+- key revoke/rotate.
+
+Не разрешать произвольные пользовательские MCP URLs. На старте использовать только allowlisted sandboxed tools.
+
+### 6.4. Web Chat
+
+Сделать Web Chat тонким клиентом собственного API.
+
+Показывать:
+
+- streaming safe response;
+- понятный статус запуска tool;
+- результат tool;
+- продолжение ответа;
+- latency debug panel для internal mode.
+
+Не показывать:
+
+- chain-of-thought;
+- raw hidden states;
+- системные prompts;
+- секреты и внутренние tool credentials.
+
+---
+
+## 7. Product Definition of Done
+
+API preview готов, когда:
+
+- один turn стабильно стримит события через SSE;
+- weather и ещё 2–4 allowlisted tools работают;
+- tool result никогда не заменяется догадкой;
+- timeout/error превращается в корректный `turn.failed` или safe continuation;
+- API keys и quotas работают;
+- каждый turn сохраняет trace;
+- Web Chat использует ровно тот же API;
+- fake tests остаются независимыми от сети и модели;
+- есть базовые p50/p95 latency measurements.
+
+---
+
+## 8. Research Track после API
+
+API не отменяет Voice Head, но не должен блокировать его разработку.
+
+Следующая research последовательность:
+
+1. plan versions и revision queue;
+2. cancel/replan только buffered output;
+3. latency sweep MCP `3000/1500/750/300 ms`;
+4. constrained Planner grammar;
+5. text Speaker revision test;
+6. audio backbone candidate evaluation;
+7. Mimi codec prototype;
+8. semantic plan → audio codebook generation;
+9. audio commit horizon;
+10. VAD и barge-in;
+11. hidden-state bridge ablation;
+12. unified semantic/audio heads только при доказанном выигрыше.
+
+Qwen3-1.7B остаётся Planner-кандидатом. Не обучать LLM с нуля. Финальный speech backbone выбирать экспериментально.
+
+---
+
+## 9. Инварианты для следующего агента
+
+1. Не добавлять закрытый LLM API в критический research path.
+2. Не загружать веса на development machine.
+3. Не ломать `SequentialBaseline` — он нужен для измерений.
+4. Tool-dependent chunk не становится committed до успешного факта.
+5. `COMMITTED` и `PLAYED` не переписываются.
+6. Не раскрывать chain-of-thought в API или UI.
+7. Любое ускорение подтверждать timeline, а не впечатлением.
+8. Product API должен использовать существующий runtime, а не отдельную имитацию.
+9. Web Chat — клиент API, не отдельная логика.
+10. Fake tests не должны зависеть от GPU, сети или Hugging Face.
+
+---
+
+## 10. Ближайшая задача для следующего агента
+
+Реализовать первый API vertical slice:
+
+```text
+DualSessionRuntime
+        ↓
+EventMapper
+        ↓
+FastAPI POST /v1/turns
+        ↓
+SSE stream
+        ↓
+curl integration test
+```
+
+Минимальный запуск должен работать с deterministic fake Planner/Speaker/MCP без ML-зависимостей. После этого добавить optional Qwen provider через существующие adapters.
+
+Ожидаемый первый curl-сценарий:
 
 ```bash
-uv sync --extra dev
-uv run pytest
+curl -N http://localhost:8000/v1/turns \
+  -H 'content-type: application/json' \
+  -H 'authorization: Bearer dev-key' \
+  -d '{"message":"Какая погода в Алматы?","tools":["weather"],"stream":true}'
 ```
 
-ML-зависимости устанавливаются отдельно:
+Definition of done этой задачи:
 
-```bash
-uv sync --extra dev --extra ml
-```
-
-Не устанавливай `audio` extra до этапа, где действительно подключается Mimi.
-
----
-
-## Следующий конкретный milestone
-
-Реализовать **shared Qwen backbone adapter** для Уровня A.
-
-Минимальный результат следующего этапа:
-
-1. `QwenBackbone` загружает `Qwen3-1.7B` один раз.
-2. Создаются две независимые logical sessions: Planner и Speaker.
-3. В первой версии допустим обычный `generate`/streaming loop без оптимального batching.
-4. Planner выдаёт валидные `SemanticEvent`, а не свободный текст.
-5. Speaker выполняет `speech_plan` и возвращает текстовый chunk.
-6. Оба adapter используются существующим `DualSessionRuntime`.
-7. Weather scenario проходит с реальной моделью.
-8. Trace показывает, что MCP запущен до tool-dependent Speaker chunk.
-9. Fake tests остаются зелёными.
-
-### Рекомендуемая последовательность
-
-1. Добавить `src/vox/model/qwen_backbone.py`:
-   - tokenizer;
-   - один `AutoModelForCausalLM`;
-   - lifecycle/load/unload;
-   - device/dtype configuration;
-   - доступ к raw forward и hidden states для следующего этапа.
-2. Добавить `src/vox/model/qwen_planner.py`:
-   - строгий prompt;
-   - incremental parsing JSONL events;
-   - validation;
-   - bounded output;
-   - non-thinking/короткий action режим.
-3. Добавить `src/vox/model/qwen_speaker.py`:
-   - отдельный conversation context;
-   - генерация по `SpeechChunk.goal` и доступным facts;
-   - запрет самостоятельного добавления неподтверждённых фактов на уровне prompt и validator.
-4. Добавить offline integration script/notebook для одного weather turn.
-5. Сохранить trace в JSONL.
-
-### Важное замечание о «двух экземплярах»
-
-Не загружать модель дважды. На первом неоптимизированном варианте два последовательных вызова одного model object допустимы, но логические контексты должны быть раздельными. Следующий шаг после функционального adapter — собственный decode scheduler с двумя KV-cache и dynamic batching.
-
----
-
-## Недостающие части и известные ограничения
-
-- Сейчас Planner и Speaker — deterministic fakes, реальных весов ещё нет.
-- `DualSessionRuntime` доказывает task overlap, но ещё не управляет decode steps или GPU batching.
-- Dependency key сейчас равен имени инструмента; для нескольких одновременных вызовов одного tool потребуется dependency по `call_id` или отдельному fact key.
-- `facts` и `chunks` изменяются в одном event loop без lock; это корректно для текущего asyncio runtime, но правила владения состоянием нужно сохранить при добавлении threads/processes.
-- Нет constrained decoder для JSON events.
-- Нет persistence JSONL trace writer.
-- Нет timeout policy на уровне runtime; fake tool моделирует latency/error, но не зависание.
-- Нет barge-in и общего cancellation token turn-а.
-- Нет hidden-state bridge.
-- Нет Voice Head и Mimi.
-- Нет аудиовхода или realtime transport.
-- В проекте на момент handoff нет Git-репозитория; не предполагай наличие истории Git.
-
----
-
-## Инварианты, которые нельзя случайно сломать
-
-1. Tool-dependent chunk не переходит в `READY/COMMITTED` без успешной зависимости.
-2. `COMMITTED` и `PLAYED` не отменяются.
-3. Planner event sequence строго возрастает.
-4. Tool failure является наблюдаемым результатом, а не причиной выдумать факт.
-5. Timeline использует монотонные часы.
-6. Sequential baseline сохраняется как контроль.
-7. Fake tests не зависят от GPU, сети или Hugging Face.
-8. Модельные детали не должны проникать в domain types.
-9. Один backbone загружается один раз; Planner/Speaker разделяют веса, но не KV-cache.
-10. Любое усложнение сравнивается с более простым baseline.
-
----
-
-## Definition of Done следующего handoff
-
-Следующий агент может завершить свой этап, когда:
-
-- все текущие 10 тестов проходят;
-- добавлены unit tests для parser/validator model output;
-- один Qwen backbone обслуживает оба adapter;
-- weather integration scenario выполняется на открытых весах;
-- trace сохраняется и содержит `tool_started`, `speaker_started`, `tool_completed`, `chunk_committed`;
-- задокументированы память, latency и обнаруженные ограничения;
-- создан следующий `handoff-2.md`.
+- SSE отдаёт `tool_started`, `safe_delta`, `tool_completed`, `delta`, `completed`;
+- sequence и timestamps монотонны;
+- ошибки сериализуются в API event;
+- 3–5 API integration tests проходят без модели;
+- README содержит запуск API;
+- новый результат фиксируется в `technical_report_02.md` или handoff-2.

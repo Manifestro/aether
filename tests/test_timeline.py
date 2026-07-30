@@ -1,6 +1,6 @@
 import unittest
 
-from vox.domain.timeline import Timeline
+from aether.domain.timeline import Timeline
 
 
 class FakeClock:

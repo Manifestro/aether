@@ -18,11 +18,11 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List
 
-from vox.model.generation import GenerationRequest, TextGenerationBackend
-from vox.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
-from vox.model.qwen_backbone import QwenBackboneConfig, SharedQwenBackbone
-from vox.runtime.dual_session import DualSessionRuntime
-from vox.testing.fakes import FakeWeatherTool
+from aether.model.generation import GenerationRequest, TextGenerationBackend
+from aether.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
+from aether.model.qwen_backbone import QwenBackboneConfig, SharedQwenBackbone
+from aether.runtime.dual_session import DualSessionRuntime
+from aether.testing.fakes import FakeWeatherTool
 
 
 class RecordingBackend:
@@ -222,8 +222,8 @@ def main() -> int:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     exit_code = asyncio.run(run_experiment(args, output_dir))
-    print(f"VOX_STAGE1_STATUS={'PASSED' if exit_code == 0 else 'FAILED'}")
-    print(f"VOX_STAGE1_REPORT={output_dir / 'report.json'}")
+    print(f"AETHER_STAGE1_STATUS={'PASSED' if exit_code == 0 else 'FAILED'}")
+    print(f"AETHER_STAGE1_REPORT={output_dir / 'report.json'}")
     return exit_code
 
 

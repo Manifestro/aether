@@ -3,7 +3,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, List, Optional, Protocol
 
-from vox.model.generation import GenerationRequest, TextGenerationBackend
+from aether.model.generation import GenerationRequest, TextGenerationBackend
 
 
 @dataclass(frozen=True)
@@ -102,7 +102,7 @@ class InterleavedDecodeScheduler(TextGenerationBackend):
             self._sessions[request.session_id] = session
             self._record("session_registered", session)
             if self._runner is None or self._runner.done():
-                self._runner = asyncio.create_task(self._run(), name="vox-decode-scheduler")
+                self._runner = asyncio.create_task(self._run(), name="aether-decode-scheduler")
 
         try:
             while True:

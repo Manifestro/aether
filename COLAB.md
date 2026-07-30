@@ -1,9 +1,9 @@
-# VOX-SYNAPSE — запуск Stage 1 в Google Colab
+# AETHER — запуск Stage 1 в Google Colab
 
-Основной способ запуска — notebook [`notebooks/vox_stage1_colab.ipynb`](notebooks/vox_stage1_colab.ipynb).
+Основной способ запуска — notebook [`notebooks/aether_stage1_colab.ipynb`](notebooks/aether_stage1_colab.ipynb).
 
 После успешного Stage 1 используй
-[`notebooks/vox_stage2_colab.ipynb`](notebooks/vox_stage2_colab.ipynb). Stage 2
+[`notebooks/aether_stage2_colab.ipynb`](notebooks/aether_stage2_colab.ipynb). Stage 2
 проверяет interleaved token decoding с отдельным KV-cache Planner и Speaker.
 
 ## Перед запуском
@@ -28,7 +28,7 @@ Notebook выполнит:
 После выполнения последней ячейки Colab скачает архив:
 
 ```text
-vox-colab-stage1-logs.zip
+aether-colab-stage1-logs.zip
 ```
 
 Пришли этот архив целиком. В нём будут:
@@ -63,7 +63,7 @@ steps выполняются поочерёдно scheduler-ом с полити
 Диагностический архив Stage 2:
 
 ```text
-vox-colab-stage2-logs.zip
+aether-colab-stage2-logs.zip
 ```
 
 В `report.json` секция `proof` автоматически показывает:

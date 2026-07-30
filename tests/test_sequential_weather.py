@@ -1,8 +1,8 @@
 import unittest
 
-from vox.domain.chunks import ChunkState
-from vox.runtime.sequential import SequentialBaseline
-from vox.testing.fakes import DeterministicSpeaker, FakeWeatherTool, WeatherPlanner
+from aether.domain.chunks import ChunkState
+from aether.runtime.sequential import SequentialBaseline
+from aether.testing.fakes import DeterministicSpeaker, FakeWeatherTool, WeatherPlanner
 
 
 class SequentialWeatherScenarioTests(unittest.IsolatedAsyncioTestCase):

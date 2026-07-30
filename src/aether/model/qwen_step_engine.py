@@ -2,9 +2,9 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, List
 
-from vox.model.generation import GenerationRequest
-from vox.model.qwen_backbone import SharedQwenBackbone
-from vox.model.step_scheduler import DecodeStep
+from aether.model.generation import GenerationRequest
+from aether.model.qwen_backbone import SharedQwenBackbone
+from aether.model.step_scheduler import DecodeStep
 
 
 @dataclass

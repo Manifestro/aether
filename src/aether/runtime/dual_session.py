@@ -2,11 +2,11 @@ import asyncio
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set
 
-from vox.domain.chunks import ChunkState, SpeechChunk
-from vox.domain.events import EventKind, SemanticEvent, ToolCall, ToolResult
-from vox.domain.timeline import Timeline
-from vox.model.protocols import Planner, Speaker, ToolExecutor
-from vox.runtime.sequential import SequentialBaseline
+from aether.domain.chunks import ChunkState, SpeechChunk
+from aether.domain.events import EventKind, SemanticEvent, ToolCall, ToolResult
+from aether.domain.timeline import Timeline
+from aether.model.protocols import Planner, Speaker, ToolExecutor
+from aether.runtime.sequential import SequentialBaseline
 
 
 @dataclass(frozen=True)

@@ -1,13 +1,13 @@
 import json
 from typing import AsyncIterator, Mapping
 
-from vox.domain.chunks import SpeechChunk
-from vox.domain.events import EventKind, SemanticEvent, ToolResult
-from vox.model.event_parser import SemanticEventStreamParser
-from vox.model.generation import GenerationRequest, GenerationSettings, TextGenerationBackend
+from aether.domain.chunks import SpeechChunk
+from aether.domain.events import EventKind, SemanticEvent, ToolResult
+from aether.model.event_parser import SemanticEventStreamParser
+from aether.model.generation import GenerationRequest, GenerationSettings, TextGenerationBackend
 
 
-_PLANNER_SYSTEM_PROMPT = """You are the VOX-SYNAPSE Planner.
+_PLANNER_SYSTEM_PROMPT = """You are the AETHER Planner.
 Emit JSONL only: one JSON object per line, with no markdown and no prose.
 Every object must contain: type, sequence, payload.
 Allowed types: intent, tool_call, speech_plan, tool_error, replan, turn_complete.
@@ -23,7 +23,7 @@ For a weather request, follow this structural pattern with values adapted to the
 {"type":"turn_complete","sequence":3,"payload":{}}
 """
 
-_SPEAKER_SYSTEM_PROMPT = """You are the VOX-SYNAPSE Speaker.
+_SPEAKER_SYSTEM_PROMPT = """You are the AETHER Speaker.
 Produce only the short text that should be spoken for the supplied speech goal.
 Use only facts explicitly supplied in the prompt.
 Never invent tool results. Do not mention internal chunks, dependencies or JSON.

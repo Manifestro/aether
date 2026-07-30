@@ -1,7 +1,7 @@
 from typing import AsyncIterator, Mapping, Protocol, Sequence
 
-from vox.domain.chunks import SpeechChunk
-from vox.domain.events import SemanticEvent, ToolCall, ToolResult
+from aether.domain.chunks import SpeechChunk
+from aether.domain.events import SemanticEvent, ToolCall, ToolResult
 
 
 class Planner(Protocol):
