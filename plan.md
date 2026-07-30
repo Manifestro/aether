@@ -43,6 +43,9 @@ AETHER развивается одновременно в двух связан�
 - scheduler;
 - timeline и telemetry.
 
+Tempo/State Controller является общим слоем для обоих интерфейсов. В Text API он управляет
+ритмом semantic/text stream, а в Voice Head дополнительно управляет паузами, темпом и просодией.
+
 ---
 
 ## 2. Что уже доказано
@@ -243,9 +246,92 @@ UI показывает:
 - каждый turn имеет trace;
 - есть хотя бы один удобный chat playground.
 
+### B4.1. Pacing в Text API
+
+До появления аудио Text API использует тот же controller contract. LNN (или временный rule-based
+baseline) может выбирать момент отправки `response.safe_delta`, размер текстового chunk, нейтральный
+`waiting` status во время MCP, границу safe/factual continuation и buffered-часть для отмены после
+`replan`.
+
+Публичный API не имитирует скрытое мышление и не добавляет случайные задержки. Допустимые статусы
+описывают только проверяемое состояние системы: `tool_started`, `waiting_for_tool`,
+`tool_completed`. Filler-слова в Text API по умолчанию запрещены; разговорный режим может получать
+их через отдельный `delivery_hint`, но не смешивает их с фактическим ответом.
+
+Пример SSE-события:
+
+```json
+{
+  "type": "response.safe_delta",
+  "text": "Проверяю погоду в Алматы",
+  "delivery_hint": "normal",
+  "revision_id": 2,
+  "committed": false
+}
+```
+
+**Критерий выхода:** controller не меняет смысл ответа, не выпускает factual text до
+`tool_completed`, корректно отменяет buffered chunks и не увеличивает p95 API latency более чем
+на 10% против baseline.
+
 ---
 
-## 6. Фаза C — Native Voice Head
+## 6. Фаза B.5 — LNN Tempo/State Controller
+
+**Цель:** проверить, может ли Liquid Neural Network (LNN) управлять delivery state AETHER в реальном времени, не становясь отдельной языковой моделью и не заменяя Planner. Один controller применяется к Text API и Voice Head через разные output adapters.
+
+LNN получает компактное состояние текущего turn и выдаёт управляющий сигнал для Speaker:
+
+```text
+semantic events + tool state + timing + playback buffer
+                         │
+                         ▼
+                 LNN controller
+                         │
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+       pace         wait policy      revision gate
+   (chunk/audio)   (status/pause)    (commit/buffer)
+```
+
+LNN использует только observable features: состояние Planner/MCP, наличие подтверждённых фактов, размер очереди chunks, commit horizon, elapsed time и состояние barge-in/VAD. Chain-of-thought между компонентами не передаётся.
+
+### B.5.1. Управление темпом
+
+В первой версии контроллер выбирает одну из политик:
+
+```text
+FAST    — короткие паузы, продолжение без filler;
+NORMAL  — обычный темп и паузы;
+HOLD    — короткое удержание до semantic/tool update.
+```
+
+В Text API эти политики преобразуются в chunk boundaries, delivery hints и проверяемые waiting statuses. В Voice Head они преобразуются в паузы, скорость и просодию. Опциональные filler-слова (`«эм…»`, `«ам…»`, `«так…»`) разрешаются только в `HOLD`, перед незафиксированным продолжением и без фактических утверждений. Filler относится к buffered output и должен отменяться при revision или barge-in.
+
+### B.5.2. Безопасный MVP
+
+Сначала сравнить LNN с детерминированным baseline на тех же timeline traces:
+
+1. реализовать feature vector и state machine без обучения;
+2. подключить маленький LNN только к выбору `FAST/NORMAL/HOLD`;
+3. оставить генерацию текста, audio decoder и semantic protocol без изменений;
+4. записывать каждое решение контроллера и причину перехода;
+5. проверить cancellation при MCP result, replan и barge-in.
+
+**Критерий выхода:** нет factual speech до подтверждения факта, контроллер не блокирует tool completion, а p95 turn latency не возрастает более чем на 10% относительно baseline.
+
+### B.5.3. Обучение и decision gate
+
+Начать с imitation learning на синтетических timeline traces, затем сравнить:
+
+- A — фиксированный pacing;
+- B — rule-based state machine;
+- C — LNN controller;
+- D — LNN с acoustic/prosody features.
+
+Измерять API first-delta latency, first audio chunk latency, unwanted filler rate, filler cancellation/splice rate, perceived waiting time, prosody naturalness, stop-on-barge-in и p50/p95 latency. LNN переходит в продуктовый runtime только при улучшении perceived responsiveness или naturalness без ухудшения semantic safety и latency; иначе остаётся исследовательским прототипом.
+
+## 7. Фаза C — Native Voice Head
 
 **Цель:** получить настоящий streaming audio output, не меняя semantic core.
 
@@ -298,7 +384,7 @@ Voice Head должен учитывать:
 
 ---
 
-## 7. Фаза D — Real-time input и barge-in
+## 8. Фаза D — Real-time input и barge-in
 
 **Цель:** перейти от text turns к полноценному голосовому циклу.
 
@@ -330,7 +416,7 @@ Voice Head должен учитывать:
 
 ---
 
-## 8. Фаза E — Hidden-state bridge и unified architecture
+## 9. Фаза E — Hidden-state bridge и unified architecture
 
 **Цель:** проверить, даёт ли прямой latent bridge преимущество над structured events.
 
@@ -384,7 +470,7 @@ Shared temporal backbone
 
 ---
 
-## 9. Метрики проекта
+## 10. Метрики проекта
 
 ### Semantic/action
 
@@ -410,6 +496,8 @@ Shared temporal backbone
 - TTFA;
 - first audio token latency;
 - first PCM chunk latency;
+- pacing-policy accuracy (`FAST/NORMAL/HOLD`);
+- unwanted filler rate and filler cancellation rate;
 - audible splice rate;
 - audio continuation success;
 - prosody consistency;
@@ -428,7 +516,7 @@ Shared temporal backbone
 
 ---
 
-## 10. Decision gates
+## 11. Decision gates
 
 После каждой фазы принимается одно из решений:
 
@@ -452,7 +540,7 @@ Shared temporal backbone
 
 ---
 
-## 11. Ближайшие задачи
+## 12. Ближайшие задачи
 
 Порядок работы после текущего Stage 2:
 
@@ -463,15 +551,16 @@ Shared temporal backbone
 5. Реализовать revision queue и plan versions.
 6. Подготовить Text API с SSE streaming.
 7. Сделать Web Chat Playground поверх API.
-8. Выбрать audio backbone для первого Voice prototype.
-9. Подключить Mimi и проверить text/semantic-to-audio continuation.
-10. Добавить barge-in и real-time input.
-11. Исследовать hidden-state bridge.
-12. Только после ablation решать вопрос unified dual-head model.
+8. Подготовить LNN tempo/state controller и сравнить с rule-based baseline.
+9. Выбрать audio backbone для первого Voice prototype.
+10. Подключить Mimi и проверить text/semantic-to-audio continuation.
+11. Добавить barge-in и real-time input.
+12. Исследовать hidden-state bridge.
+13. Только после ablation решать вопрос unified dual-head model.
 
 ---
 
-## 12. Definition of success
+## 13. Definition of success
 
 ### Ближайший product result
 
@@ -498,12 +587,14 @@ AETHER получает native streaming Voice Head, который:
 
 ---
 
-## 13. Финальная позиция
+## 14. Финальная позиция
 
 Мы не обязаны выбирать между продуктом и исследованием.
 
 Text API и Web Chat могут стать первым публичным проявлением AETHER уже сейчас. Их ядро будет тем же, что потребуется Voice Head: Planner, MCP, revisions, dependencies, scheduler и commit horizon.
 
 Voice Head следует строить как отдельный серьёзный research track. Qwen остаётся полезным Planner, но финальный speech backbone должен быть выбран экспериментально. Собственную LLM с нуля не обучаем; создаём собственную архитектуру поверх открытых pretrained компонентов.
+
+LNN рассматривается как общий tempo/state controller перед Text API и Voice Head: в API он влияет на chunk boundaries, delivery hints и revision timing, а в аудио — на скорость, паузы и безопасные filler-слова. Он не получает chain-of-thought и не имеет права обходить semantic dependencies. Сначала сравниваем его с rule-based baseline; при отсутствии измеримого выигрыша оставляем простой контроллер.
 
 Главный критерий — не завершить заранее выбранную архитектуру, а доказать, что AETHER делает голосового агента быстрее, естественнее и способнее действовать в реальном времени.

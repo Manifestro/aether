@@ -33,11 +33,55 @@ class SemanticEventStreamParserTests(unittest.TestCase):
             '{"type":"tool_call","sequence":0,"payload":{"call_id":"c","tool":"weather","arguments":{}}}\n'
         )
         self.assertEqual([event.sequence for event in events], [0, 1])
+        self.assertEqual(parser.repaired_count, 1)
 
     def test_rejects_incomplete_tool_call(self) -> None:
         parser = SemanticEventStreamParser("turn-1")
         with self.assertRaises(ValueError):
             parser.feed('{"type":"tool_call","sequence":0,"payload":{}}\n')
+
+    def test_strict_grammar_rejects_intent_event(self) -> None:
+        parser = SemanticEventStreamParser("turn-1", strict=True)
+        with self.assertRaises(ValueError):
+            parser.feed('{"type":"intent","sequence":0,"payload":{}}\n')
+
+    def test_strict_grammar_requires_safe_to_say(self) -> None:
+        parser = SemanticEventStreamParser("turn-1", strict=True)
+        with self.assertRaises(ValueError):
+            parser.feed(
+                '{"type":"speech_plan","sequence":0,'
+                '"payload":{"chunk_id":"lead-in","goal":"hi","dependencies":[]}}\n'
+            )
+
+    def test_strict_grammar_rejects_inconsistent_safe_to_say(self) -> None:
+        parser = SemanticEventStreamParser("turn-1", strict=True)
+        with self.assertRaises(ValueError):
+            parser.feed(
+                '{"type":"speech_plan","sequence":0,"payload":'
+                '{"chunk_id":"answer","goal":"hi","dependencies":["weather"],"safe_to_say":true}}\n'
+            )
+
+    def test_strict_grammar_accepts_consistent_speech_plan(self) -> None:
+        parser = SemanticEventStreamParser("turn-1", strict=True)
+        events = parser.feed(
+            '{"type":"speech_plan","sequence":0,"payload":'
+            '{"chunk_id":"lead-in","goal":"hi","dependencies":[],"safe_to_say":true}}\n'
+        )
+        self.assertEqual(len(events), 1)
+
+    def test_strict_grammar_rejects_nonempty_turn_complete_payload(self) -> None:
+        parser = SemanticEventStreamParser("turn-1", strict=True)
+        with self.assertRaises(ValueError):
+            parser.feed('{"type":"turn_complete","sequence":0,"payload":{"note":"done"}}\n')
+
+    def test_revision_id_defaults_to_zero_and_is_parsed(self) -> None:
+        parser = SemanticEventStreamParser("turn-1")
+        events = parser.feed('{"type":"turn_complete","sequence":0,"payload":{},"revision_id":2}\n')
+        self.assertEqual(events[0].revision_id, 2)
+
+        parser2 = SemanticEventStreamParser("turn-1")
+        events2 = parser2.feed('{"type":"turn_complete","sequence":0,"payload":{}}\n')
+        self.assertEqual(events2[0].revision_id, 0)
 
 
 if __name__ == "__main__":

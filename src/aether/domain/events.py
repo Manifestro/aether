@@ -22,12 +22,15 @@ class SemanticEvent:
     sequence: int
     kind: EventKind
     payload: Mapping[str, Any] = field(default_factory=dict)
+    revision_id: int = 0
 
     def __post_init__(self) -> None:
         if not self.turn_id.strip():
             raise ValueError("turn_id must not be empty")
         if self.sequence < 0:
             raise ValueError("sequence must be non-negative")
+        if self.revision_id < 0:
+            raise ValueError("revision_id must be non-negative")
 
 
 @dataclass(frozen=True)

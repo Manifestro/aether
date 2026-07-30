@@ -2,9 +2,10 @@ from dataclasses import dataclass
 from typing import Dict, List
 
 from aether.domain.chunks import ChunkState, SpeechChunk
-from aether.domain.events import EventKind, SemanticEvent, ToolCall, ToolResult
+from aether.domain.events import EventKind, SemanticEvent, ToolResult
 from aether.domain.timeline import Timeline
 from aether.model.protocols import Planner, Speaker, ToolExecutor
+from aether.runtime.converters import SequenceGuard, chunk_from, tool_call_from
 
 
 @dataclass(frozen=True)
@@ -31,18 +32,16 @@ class SequentialBaseline:
         events: List[SemanticEvent] = []
         chunks: List[SpeechChunk] = []
         facts: Dict[str, ToolResult] = {}
-        last_sequence = -1
+        sequence_guard = SequenceGuard()
 
         timeline.record("planner_started")
         async for event in self._planner.plan(turn_id, request):
-            if event.sequence <= last_sequence:
-                raise ValueError("planner event sequence must be strictly increasing")
-            last_sequence = event.sequence
+            sequence_guard.check(event)
             events.append(event)
             timeline.record("semantic_event", kind=event.kind.value, sequence=event.sequence)
 
             if event.kind is EventKind.TOOL_CALL:
-                call = self._tool_call_from(event)
+                call = tool_call_from(event)
                 timeline.record("tool_started", call_id=call.call_id, tool=call.name)
                 result = await self._tools.execute(call)
                 timeline.record(
@@ -53,7 +52,7 @@ class SequentialBaseline:
                 )
                 facts[call.name] = result
             elif event.kind is EventKind.SPEECH_PLAN:
-                chunks.append(self._chunk_from(event))
+                chunks.append(chunk_from(event))
 
         timeline.record("planner_completed")
 
@@ -82,29 +81,3 @@ class SequentialBaseline:
             facts=facts,
             timeline=timeline,
         )
-
-    @staticmethod
-    def _tool_call_from(event: SemanticEvent) -> ToolCall:
-        payload = event.payload
-        try:
-            return ToolCall(
-                call_id=str(payload["call_id"]),
-                name=str(payload["tool"]),
-                arguments=dict(payload["arguments"]),
-            )
-        except (KeyError, TypeError, ValueError) as error:
-            raise ValueError("invalid tool_call payload") from error
-
-    @staticmethod
-    def _chunk_from(event: SemanticEvent) -> SpeechChunk:
-        payload = event.payload
-        try:
-            return SpeechChunk(
-                chunk_id=str(payload["chunk_id"]),
-                goal=str(payload["goal"]),
-                dependencies=frozenset(str(item) for item in payload.get("dependencies", [])),
-                plan_version=int(payload.get("plan_version", 1)),
-                turn_id=event.turn_id,
-            )
-        except (KeyError, TypeError, ValueError) as error:
-            raise ValueError("invalid speech_plan payload") from error

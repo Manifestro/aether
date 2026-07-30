@@ -1,5 +1,5 @@
 import json
-from typing import AsyncIterator, Mapping
+from typing import AsyncIterator, Mapping, Optional
 
 from aether.domain.chunks import SpeechChunk
 from aether.domain.events import EventKind, SemanticEvent, ToolResult
@@ -10,16 +10,20 @@ from aether.model.generation import GenerationRequest, GenerationSettings, TextG
 _PLANNER_SYSTEM_PROMPT = """You are the AETHER Planner.
 Emit JSONL only: one JSON object per line, with no markdown and no prose.
 Every object must contain: type, sequence, payload.
-Allowed types: intent, tool_call, speech_plan, tool_error, replan, turn_complete.
+Allowed types: tool_call, speech_plan, tool_error, replan, turn_complete.
+There is no separate "intent" event. Never emit one.
 Use strictly increasing integer sequence values starting at 0.
-For an actionable tool request, emit tool_call as the first event. Do not emit a separate intent.
+For an actionable tool request, emit tool_call as the first event.
 Create safe speech_plan chunks without tool dependencies when possible.
 Any factual chunk requiring a tool must list that tool name in dependencies.
+Every speech_plan payload must include a boolean "safe_to_say" field that is
+true only when dependencies is empty.
+The turn_complete payload must be an empty object.
 Do not emit private chain-of-thought. Emit only observable plans and actions.
 For a weather request, follow this structural pattern with values adapted to the user:
 {"type":"tool_call","sequence":0,"payload":{"call_id":"weather-1","tool":"weather","arguments":{"location":"Almaty"}}}
-{"type":"speech_plan","sequence":1,"payload":{"chunk_id":"lead-in","goal":"Сообщить, что проверка погоды началась и результат ещё ожидается","dependencies":[]}}
-{"type":"speech_plan","sequence":2,"payload":{"chunk_id":"answer","goal":"Сообщить подтверждённую погоду","dependencies":["weather"]}}
+{"type":"speech_plan","sequence":1,"payload":{"chunk_id":"lead-in","goal":"Сообщить, что проверка погоды началась и результат ещё ожидается","dependencies":[],"safe_to_say":true}}
+{"type":"speech_plan","sequence":2,"payload":{"chunk_id":"answer","goal":"Сообщить подтверждённую погоду","dependencies":["weather"],"safe_to_say":false}}
 {"type":"turn_complete","sequence":3,"payload":{}}
 """
 
@@ -38,12 +42,17 @@ class QwenPlannerAdapter:
     ) -> None:
         self._backend = backend
         self._settings = settings
+        # Exposed so callers (experiments, telemetry) can observe sequence
+        # repairs instead of them being silently swallowed by the parser.
+        self.last_parser: Optional[SemanticEventStreamParser] = None
 
     async def plan(self, turn_id: str, request: str) -> AsyncIterator[SemanticEvent]:
         # Open models occasionally repeat a sequence value while streaming.
-        # Normalize that adapter-boundary defect; the runtime still receives a
-        # strictly increasing, auditable event sequence.
-        parser = SemanticEventStreamParser(turn_id, repair_sequences=True)
+        # Normalize that adapter-boundary defect but keep it observable via
+        # `last_parser.repaired_count` rather than a fully silent repair, and
+        # enforce the constrained production event grammar (strict=True).
+        parser = SemanticEventStreamParser(turn_id, repair_sequences=True, strict=True)
+        self.last_parser = parser
         generation = GenerationRequest(
             session_id=f"planner:{turn_id}",
             role="planner",

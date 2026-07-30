@@ -6,11 +6,10 @@ from aether.runtime.dual_session import DualSessionRuntime
 from aether.testing.fakes import FakeTokenStepEngine, FakeWeatherTool
 
 
-PLANNER_SCRIPT = """{"type":"intent","sequence":0,"payload":{"name":"get_weather"}}
-{"type":"tool_call","sequence":1,"payload":{"call_id":"weather-1","tool":"weather","arguments":{"location":"Almaty"}}}
-{"type":"speech_plan","sequence":2,"payload":{"chunk_id":"lead-in","goal":"Подтвердить проверку погоды","dependencies":[]}}
-{"type":"speech_plan","sequence":3,"payload":{"chunk_id":"answer","goal":"Сообщить погоду","dependencies":["weather"]}}
-{"type":"turn_complete","sequence":4,"payload":{}}
+PLANNER_SCRIPT = """{"type":"tool_call","sequence":0,"payload":{"call_id":"weather-1","tool":"weather","arguments":{"location":"Almaty"}}}
+{"type":"speech_plan","sequence":1,"payload":{"chunk_id":"lead-in","goal":"Подтвердить проверку погоды","dependencies":[],"safe_to_say":true}}
+{"type":"speech_plan","sequence":2,"payload":{"chunk_id":"answer","goal":"Сообщить погоду","dependencies":["weather"],"safe_to_say":false}}
+{"type":"turn_complete","sequence":3,"payload":{}}
 """
 
 

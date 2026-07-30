@@ -1,4 +1,4 @@
-from typing import AsyncIterator, Mapping, Protocol, Sequence
+from typing import AsyncIterator, Mapping, Protocol
 
 from aether.domain.chunks import SpeechChunk
 from aether.domain.events import SemanticEvent, ToolCall, ToolResult
@@ -20,10 +20,5 @@ class Speaker(Protocol):
 
 class ToolExecutor(Protocol):
     async def execute(self, call: ToolCall) -> ToolResult:
-        ...
-
-
-class EventValidator(Protocol):
-    def validate_sequence(self, events: Sequence[SemanticEvent]) -> None:
         ...
 

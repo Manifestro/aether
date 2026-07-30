@@ -6,7 +6,7 @@ from aether.domain.chunks import ChunkState, SpeechChunk
 from aether.domain.events import EventKind, SemanticEvent, ToolCall, ToolResult
 from aether.domain.timeline import Timeline
 from aether.model.protocols import Planner, Speaker, ToolExecutor
-from aether.runtime.sequential import SequentialBaseline
+from aether.runtime.converters import SequenceGuard, chunk_from, tool_call_from
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,7 @@ class DualSessionRuntime:
         dispatched: Set[str] = set()
         tool_tasks: List["asyncio.Task[None]"] = []
         speech_queue: "asyncio.Queue[Optional[SpeechChunk]]" = asyncio.Queue(maxsize=8)
-        last_sequence = -1
+        sequence_guard = SequenceGuard()
 
         async def dispatch_if_ready(chunk: SpeechChunk) -> None:
             available = frozenset(
@@ -103,21 +103,19 @@ class DualSessionRuntime:
         timeline.record("planner_started")
         try:
             async for event in self._planner.plan(turn_id, request):
-                if event.sequence <= last_sequence:
-                    raise ValueError("planner event sequence must be strictly increasing")
-                last_sequence = event.sequence
+                sequence_guard.check(event)
                 events.append(event)
                 timeline.record("semantic_event", kind=event.kind.value, sequence=event.sequence)
 
                 if event.kind is EventKind.TOOL_CALL:
-                    call = SequentialBaseline._tool_call_from(event)
+                    call = tool_call_from(event)
                     task = asyncio.create_task(
                         execute_tool(call),
                         name=f"tool:{turn_id}:{call.call_id}",
                     )
                     tool_tasks.append(task)
                 elif event.kind is EventKind.SPEECH_PLAN:
-                    chunk = SequentialBaseline._chunk_from(event)
+                    chunk = chunk_from(event)
                     chunks.append(chunk)
                     await dispatch_if_ready(chunk)
         except BaseException:

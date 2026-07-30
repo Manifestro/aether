@@ -5,11 +5,10 @@ from aether.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
 from aether.testing.fakes import FakeWeatherTool, ScriptedSharedBackend
 
 
-PLANNER_SCRIPT = """{"type":"intent","sequence":0,"payload":{"name":"get_weather"}}
-{"type":"tool_call","sequence":1,"payload":{"call_id":"weather-1","tool":"weather","arguments":{"location":"Almaty"}}}
-{"type":"speech_plan","sequence":2,"payload":{"chunk_id":"lead-in","goal":"Подтвердить проверку погоды","dependencies":[]}}
-{"type":"speech_plan","sequence":3,"payload":{"chunk_id":"answer","goal":"Сообщить погоду","dependencies":["weather"]}}
-{"type":"turn_complete","sequence":4,"payload":{}}
+PLANNER_SCRIPT = """{"type":"tool_call","sequence":0,"payload":{"call_id":"weather-1","tool":"weather","arguments":{"location":"Almaty"}}}
+{"type":"speech_plan","sequence":1,"payload":{"chunk_id":"lead-in","goal":"Подтвердить проверку погоды","dependencies":[],"safe_to_say":true}}
+{"type":"speech_plan","sequence":2,"payload":{"chunk_id":"answer","goal":"Сообщить погоду","dependencies":["weather"],"safe_to_say":false}}
+{"type":"turn_complete","sequence":3,"payload":{}}
 """
 
 
@@ -65,7 +64,7 @@ class QwenAdapterContractTests(unittest.IsolatedAsyncioTestCase):
         events = [event async for event in planner.plan("turn-stop", "Погода?")]
 
         self.assertEqual(events[-1].kind.value, "turn_complete")
-        self.assertEqual(len(events), 5)
+        self.assertEqual(len(events), 4)
 
 
 if __name__ == "__main__":
