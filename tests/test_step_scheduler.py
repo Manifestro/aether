@@ -4,7 +4,14 @@ from vox.model.qwen_adapters import QwenPlannerAdapter, QwenSpeakerAdapter
 from vox.model.step_scheduler import InterleavedDecodeScheduler
 from vox.runtime.dual_session import DualSessionRuntime
 from vox.testing.fakes import FakeTokenStepEngine, FakeWeatherTool
-from tests.test_qwen_adapters import PLANNER_SCRIPT
+
+
+PLANNER_SCRIPT = """{"type":"intent","sequence":0,"payload":{"name":"get_weather"}}
+{"type":"tool_call","sequence":1,"payload":{"call_id":"weather-1","tool":"weather","arguments":{"location":"Almaty"}}}
+{"type":"speech_plan","sequence":2,"payload":{"chunk_id":"lead-in","goal":"Подтвердить проверку погоды","dependencies":[]}}
+{"type":"speech_plan","sequence":3,"payload":{"chunk_id":"answer","goal":"Сообщить погоду","dependencies":["weather"]}}
+{"type":"turn_complete","sequence":4,"payload":{}}
+"""
 
 
 def trace_index(trace, name, role):
