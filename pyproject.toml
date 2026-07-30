@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vox-synapse"
+version = "0.1.0"
+description = "Research runtime for predictive dual-stream speech and MCP orchestration"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+dependencies = [
+    "mcp>=1.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.9",
+]
+ml = [
+    "accelerate>=1.0",
+    "peft>=0.14",
+    "safetensors>=0.5",
+    "torch>=2.5",
+    "torchaudio>=2.5",
+    "transformers>=4.51",
+]
+audio = [
+    "moshi>=0.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vox"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
