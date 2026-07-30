@@ -2,6 +2,7 @@ model_path: Qwen/Qwen3-1.7B
 device_map: auto
 dtype: auto
 allow_download: false
+enable_thinking: false
 
 # Safety default: model loading must be an explicit action in the target ML
 # environment. The local development and test suite never call load().

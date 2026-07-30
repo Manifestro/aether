@@ -16,6 +16,10 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 
 ## Target environment
 
+Python 3.12 is recommended for the research environment. The package remains
+installable on Python 3.10+ so hosted GPU notebook runtimes can execute the
+smoke tests without replacing their kernel interpreter.
+
 ```bash
 uv sync --extra dev
 uv run pytest
@@ -37,4 +41,3 @@ The model-ready layer now includes:
 
 No model is loaded by importing or constructing these adapters. Loading is an
 explicit operation reserved for the target ML environment.
-

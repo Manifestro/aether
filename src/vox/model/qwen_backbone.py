@@ -12,6 +12,7 @@ class QwenBackboneConfig:
     device_map: str = "auto"
     dtype: str = "auto"
     allow_download: bool = False
+    enable_thinking: bool = False
 
     def __post_init__(self) -> None:
         if not self.model_path.strip():
@@ -94,6 +95,7 @@ class SharedQwenBackbone:
                 list(request.messages),
                 tokenize=False,
                 add_generation_prompt=True,
+                enable_thinking=self.config.enable_thinking,
             )
             inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
             streamer = TextIteratorStreamer(
