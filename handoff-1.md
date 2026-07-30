@@ -1,5 +1,48 @@
 # VOX-SYNAPSE — Handoff 1
 
+> **Актуализация:** после первоначального handoff был завершён model-ready adapter layer. Текущий статус и новый следующий шаг перечислены ниже. Эта секция имеет приоритет над историческим разделом «Следующий конкретный milestone».
+
+### Выполнено после первоначального handoff
+
+- добавлен provider-neutral `TextGenerationBackend`;
+- добавлены `GenerationRequest` и `GenerationSettings`;
+- реализован incremental JSONL parser для semantic events;
+- parser валидирует типы событий, возрастающий `sequence`, `tool_call` и `speech_plan` payload;
+- реализованы `QwenPlannerAdapter` и `QwenSpeakerAdapter`;
+- реализован ленивый `SharedQwenBackbone`;
+- Transformers/PyTorch импортируются только внутри явного `load()`;
+- `allow_download=False` и `local_files_only=True` используются по умолчанию;
+- один backend обслуживает независимые `planner:<turn_id>` и `speaker:<turn_id>` сессии;
+- добавлен `ScriptedSharedBackend`, проверяющий весь model contract без весов и ML-зависимостей;
+- `SpeechChunk` теперь хранит `turn_id` для изоляции Speaker-сессий;
+- полный набор содержит **17 dependency-free tests**, все проходят.
+
+Новые ключевые файлы:
+
+```text
+src/vox/model/generation.py
+src/vox/model/event_parser.py
+src/vox/model/qwen_adapters.py
+src/vox/model/qwen_backbone.py
+tests/test_event_parser.py
+tests/test_qwen_adapters.py
+tests/test_qwen_backbone_safety.py
+```
+
+### Актуальный следующий milestone
+
+В среде, где разрешены веса, выполнить offline smoke test `SharedQwenBackbone` с Qwen3-1.7B и записать фактический model output. Затем, не меняя adapter contract:
+
+1. исправить реальные отклонения JSONL через prompt/parser/constrained decoding;
+2. добавить JSONL trace writer;
+3. отделить model loading notebook/script от библиотечного кода;
+4. измерить VRAM и latency одного Planner и одного Speaker запроса;
+5. заменить сериализованный `generate` lock на экспериментальный decode scheduler с двумя KV-cache;
+6. сравнить sequential model baseline и dual-session model runtime;
+7. сохранить fake tests полностью независимыми от модели и сети.
+
+Текущий `SharedQwenBackbone` намеренно сериализует Hugging Face `generate` вызовы. Он проверяет загрузку одного набора весов и adapter contract, но ещё не обеспечивает истинное конкурентное декодирование на GPU. Это следующая исследовательская граница.
+
 ## Назначение документа
 
 Этот файл предназначен для следующего агента, который продолжит проект с текущего состояния. Сначала прочитай:
@@ -169,10 +212,10 @@ vox/
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-Ожидаемый результат на момент handoff:
+Ожидаемый актуальный результат:
 
 ```text
-Ran 10 tests
+Ran 17 tests
 OK
 ```
 

@@ -1,8 +1,9 @@
 import asyncio
-from typing import AsyncIterator, Mapping
+from typing import AsyncIterator, Dict, List, Mapping
 
 from vox.domain.chunks import SpeechChunk
 from vox.domain.events import EventKind, SemanticEvent, ToolCall, ToolResult
+from vox.model.generation import GenerationRequest
 
 
 class WeatherPlanner:
@@ -85,3 +86,22 @@ class DeterministicSpeaker:
             "зонт лучше взять."
         )
 
+
+class ScriptedSharedBackend:
+    """In-memory stand-in for one shared Qwen model with logical sessions."""
+
+    def __init__(self, scripts: Mapping[str, str], chunk_size: int = 13) -> None:
+        self.scripts = dict(scripts)
+        self.chunk_size = chunk_size
+        self.requests: List[GenerationRequest] = []
+        self.session_counts: Dict[str, int] = {}
+
+    async def stream(self, request: GenerationRequest) -> AsyncIterator[str]:
+        self.requests.append(request)
+        self.session_counts[request.session_id] = self.session_counts.get(request.session_id, 0) + 1
+        text = self.scripts[request.role]
+        if request.role == "speaker" and '"weather"' in request.messages[-1]["content"]:
+            text = "Сейчас 24 градуса, ожидается дождь — зонт лучше взять."
+        for offset in range(0, len(text), self.chunk_size):
+            await asyncio.sleep(0)
+            yield text[offset : offset + self.chunk_size]

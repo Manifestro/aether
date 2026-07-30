@@ -104,7 +104,7 @@ class SequentialBaseline:
                 goal=str(payload["goal"]),
                 dependencies=frozenset(str(item) for item in payload.get("dependencies", [])),
                 plan_version=int(payload.get("plan_version", 1)),
+                turn_id=event.turn_id,
             )
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("invalid speech_plan payload") from error
-

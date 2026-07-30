@@ -31,6 +31,7 @@ class SpeechChunk:
     dependencies: FrozenSet[str] = field(default_factory=frozenset)
     plan_version: int = 1
     state: ChunkState = ChunkState.BLOCKED
+    turn_id: str = ""
 
     def __post_init__(self) -> None:
         if not self.chunk_id.strip():
@@ -60,4 +61,3 @@ class SpeechChunk:
             ChunkState.GENERATING,
             ChunkState.BUFFERED,
         }
-
