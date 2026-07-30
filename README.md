@@ -4,7 +4,9 @@ Research code for the predictive dual-stream architecture described in
 [`spec.md`](spec.md).
 
 The first measured result is documented in
-[`technical_report_01.md`](technical_report_01.md).
+[`technical_report_01.md`](technical_report_01.md); constrained grammar, tool
+allowlisting, plan revision and the first real-model run of the product API
+are documented in [`technical_report_02.md`](technical_report_02.md).
 
 The current implementation contains an instrumented sequential baseline and a
 concurrent dual-session runtime. It keeps model adapters separate from the
