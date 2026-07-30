@@ -74,6 +74,20 @@ class DualSessionScenarioTests(unittest.IsolatedAsyncioTestCase):
             event_index(result, "tool_completed"),
         )
 
+    async def test_on_event_streams_events_live_before_the_turn_finishes(self) -> None:
+        seen = []
+        runtime = DualSessionRuntime(
+            WeatherPlanner(),
+            DeterministicSpeaker(),
+            FakeWeatherTool(latency_ms=5),
+        )
+
+        result = await runtime.run("turn-live", "Какая погода?", on_event=seen.append)
+
+        # Same content as the post-hoc timeline, delivered as it happened.
+        self.assertEqual([event.name for event in seen], [event.name for event in result.timeline.events])
+        self.assertIn("tool_completed", [event.name for event in seen])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,6 +27,14 @@ class TimelineTests(unittest.TestCase):
         events.clear()
         self.assertEqual(len(timeline.events), 1)
 
+    def test_on_event_is_called_synchronously_for_each_record(self) -> None:
+        seen = []
+        timeline = Timeline(clock_ns=FakeClock(), on_event=seen.append)
+        timeline.record("a")
+        timeline.record("b")
+        self.assertEqual([event.name for event in seen], ["a", "b"])
+        self.assertEqual(seen, timeline.events)
+
 
 if __name__ == "__main__":
     unittest.main()

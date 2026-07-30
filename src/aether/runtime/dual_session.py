@@ -1,10 +1,10 @@
 import asyncio
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set
 
 from aether.domain.chunks import ChunkState, SpeechChunk
 from aether.domain.events import EventKind, SemanticEvent, ToolCall, ToolResult
-from aether.domain.timeline import Timeline
+from aether.domain.timeline import Timeline, TraceEvent
 from aether.model.protocols import Planner, Speaker, ToolExecutor
 from aether.runtime.converters import SequenceGuard, chunk_from, tool_call_from
 
@@ -31,8 +31,20 @@ class DualSessionRuntime:
         self._speaker = speaker
         self._tools = tools
 
-    async def run(self, turn_id: str, request: str) -> DualSessionResult:
-        timeline = Timeline()
+    async def run(
+        self,
+        turn_id: str,
+        request: str,
+        on_event: Optional[Callable[[TraceEvent], None]] = None,
+    ) -> DualSessionResult:
+        """Run one turn.
+
+        ``on_event`` is an optional live hook (see `Timeline`) so a caller —
+        e.g. an API layer streaming SSE — can observe events as the turn
+        progresses instead of only reading `DualSessionResult.timeline`
+        after this coroutine returns.
+        """
+        timeline = Timeline(on_event=on_event)
         timeline.record("turn_started", turn_id=turn_id)
 
         events: List[SemanticEvent] = []
@@ -71,6 +83,8 @@ class DualSessionRuntime:
                 call_id=call.call_id,
                 tool=call.name,
                 succeeded=result.succeeded,
+                content=dict(result.content) if result.succeeded else {},
+                error=result.error,
             )
             for chunk in chunks:
                 await dispatch_if_ready(chunk)
@@ -103,7 +117,12 @@ class DualSessionRuntime:
                     chunk.transition_to(ChunkState.BUFFERED)
                     timeline.record("chunk_buffered", chunk_id=chunk.chunk_id)
                     chunk.transition_to(ChunkState.COMMITTED)
-                    timeline.record("chunk_committed", chunk_id=chunk.chunk_id)
+                    timeline.record(
+                        "chunk_committed",
+                        chunk_id=chunk.chunk_id,
+                        text=text,
+                        safe_to_say=not chunk.dependencies,
+                    )
                     chunk.transition_to(ChunkState.PLAYED)
                     timeline.record("chunk_played", chunk_id=chunk.chunk_id)
                     if text.strip():

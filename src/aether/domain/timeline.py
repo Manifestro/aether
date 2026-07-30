@@ -1,6 +1,6 @@
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 
 @dataclass(frozen=True)
@@ -11,12 +11,25 @@ class TraceEvent:
 
 
 class Timeline:
-    """Append-only monotonic event trace for a single turn."""
+    """Append-only monotonic event trace for a single turn.
 
-    def __init__(self, clock_ns: Callable[[], int] = time.monotonic_ns) -> None:
+    ``on_event``, when supplied, is invoked synchronously with each
+    ``TraceEvent`` at the moment it is recorded — before ``record()``
+    returns. This is the seam a live consumer (an SSE endpoint, a debug
+    panel) uses to observe a turn as it happens instead of only reading
+    ``.events`` after the turn has finished. It must not block or raise;
+    Timeline does not catch exceptions from it.
+    """
+
+    def __init__(
+        self,
+        clock_ns: Callable[[], int] = time.monotonic_ns,
+        on_event: Optional[Callable[[TraceEvent], None]] = None,
+    ) -> None:
         self._clock_ns = clock_ns
         self._origin_ns = clock_ns()
         self._events: List[TraceEvent] = []
+        self._on_event = on_event
 
     def record(self, name: str, **attributes: Any) -> TraceEvent:
         if not name.strip():
@@ -29,6 +42,8 @@ class Timeline:
         if self._events and event.timestamp_ns < self._events[-1].timestamp_ns:
             raise RuntimeError("timeline clock moved backwards")
         self._events.append(event)
+        if self._on_event is not None:
+            self._on_event(event)
         return event
 
     @property
