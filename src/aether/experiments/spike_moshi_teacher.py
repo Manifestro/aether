@@ -24,6 +24,7 @@ report comes back from Colab.
 """
 
 import argparse
+import importlib
 import inspect
 import json
 import time
@@ -233,13 +234,34 @@ def run_spike(args: argparse.Namespace, output_dir: Path) -> Dict[str, Any]:
         module_surfaces: Dict[str, Any] = {}
         for module_name in matching_modules:
             try:
-                import importlib
-
                 module = importlib.import_module(module_name)
                 module_surfaces[module_name] = describe_object(module)
             except Exception as error:  # noqa: BLE001
                 module_surfaces[module_name] = {"import_error": repr(error)}
         report["matching_module_surfaces"] = module_surfaces
+
+        # `moshi.run_tts` is a real, working CLI script that exercises the
+        # full text -> TTSModel -> audio path end to end. Its source is
+        # ground truth for the actual call sequence -- reading it beats
+        # guessing at a call chain from class signatures alone.
+        source_dump: Dict[str, Any] = {}
+        for target_name, getter in (
+            ("moshi.run_tts", lambda: importlib.import_module("moshi.run_tts")),
+            ("moshi.models.tts.TTSModel", lambda: importlib.import_module("moshi.models.tts").TTSModel),
+            (
+                "moshi.models.tts.get_default_tts_model",
+                lambda: importlib.import_module("moshi.models.tts").get_default_tts_model,
+            ),
+            (
+                "moshi.models.tts.script_to_entries",
+                lambda: importlib.import_module("moshi.models.tts").script_to_entries,
+            ),
+        ):
+            try:
+                source_dump[target_name] = inspect.getsource(getter())
+            except Exception as error:  # noqa: BLE001
+                source_dump[target_name] = f"<could not get source: {error!r}>"
+        report["reference_source_code"] = source_dump
     except Exception as error:  # noqa: BLE001
         report["moshi_package_scan_error"] = repr(error)
 
