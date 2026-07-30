@@ -41,13 +41,23 @@ def resolve_default_voice(voice_repo: str) -> str:
 
     Not a claim that this is "the" default voice -- just a deterministic,
     inspectable choice so this runner doesn't need a human to name one.
+
+    Only `.wav` entries qualify. A first real run found this repo also
+    contains `<voice>.wav.<hash>@<n>.safetensors` siblings -- precomputed
+    embeddings cached for a specific model checkpoint, not raw audio.
+    `TTSModel.get_prefix()` calls `sphn.read()` on whatever path it's given,
+    which needs actual audio; picking a `.safetensors` sibling by accident
+    fails with `ValueError: ... end of stream`. The `TTSRequest` docstring
+    (see moshi/run_tts.py) confirms a "voice name" is just a file that
+    exists in the voice repository, so a plain `.wav` relative path is the
+    right thing to pass through unchanged.
     """
     from huggingface_hub import list_repo_files
 
     files = list_repo_files(voice_repo)
-    candidates = [f for f in files if f.endswith((".safetensors", ".pt", ".wav"))]
+    candidates = [f for f in files if f.endswith(".wav")]
     if not candidates:
-        raise RuntimeError(f"no usable voice files found in {voice_repo}: {files[:20]}")
+        raise RuntimeError(f"no .wav voice files found in {voice_repo}: {files[:20]}")
     return sorted(candidates)[0]
 
 
@@ -75,25 +85,39 @@ def generate_teacher_tokens(
     tts_nq: int,
     device: str,
     max_audio_tokens: int,
+    diagnostics: Optional[Dict[str, Any]] = None,
+    on_diagnostics_update: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Returns {"tokens": {phrase_id: [int,...]}, "diagnostics": {...}}.
 
     Follows `moshi/run_tts.py`'s real call sequence (confirmed via source
     inspection, see the spike reports), not a guessed API.
+
+    ``diagnostics``, if given, is filled in-place and ``on_diagnostics_update``
+    (if given) is called after each field is added -- so a caller can persist
+    partial diagnostics to disk even if a later step in this function raises,
+    instead of losing everything a failed run learned.
     """
     import torch
 
     from moshi.models.loaders import CheckpointInfo
     from moshi.models.tts import TTSModel
 
-    diagnostics: Dict[str, Any] = {}
+    if diagnostics is None:
+        diagnostics = {}
+
+    def _update(key: str, value: Any) -> None:
+        diagnostics[key] = value
+        if on_diagnostics_update is not None:
+            on_diagnostics_update()
+
     checkpoint_info = CheckpointInfo.from_hf_repo(tts_hf_repo)
     tts_model = TTSModel.from_checkpoint_info(
         checkpoint_info, voice_repo=voice_repo, n_q=tts_nq, device=device, dtype=torch.bfloat16
     )
-    diagnostics["multi_speaker"] = bool(tts_model.multi_speaker)
-    diagnostics["valid_cfg_conditionings"] = bool(tts_model.valid_cfg_conditionings)
-    diagnostics["delay_steps"] = int(tts_model.delay_steps)
+    _update("multi_speaker", bool(tts_model.multi_speaker))
+    _update("valid_cfg_conditionings", bool(tts_model.valid_cfg_conditionings))
+    _update("delay_steps", int(tts_model.delay_steps))
 
     cfg_coef_conditioning = None
     if tts_model.valid_cfg_conditionings:
@@ -109,7 +133,7 @@ def generate_teacher_tokens(
     prefixes = None
     if tts_model.multi_speaker:
         voice_name = resolve_default_voice(voice_repo)
-        diagnostics["voice_name"] = voice_name
+        _update("voice_name", voice_name)
         prefixes = []
 
     all_entries = []
@@ -131,7 +155,7 @@ def generate_teacher_tokens(
         cfg_is_no_prefix=cfg_is_no_prefix, cfg_is_no_text=cfg_is_no_text,
     )
     frames = torch.cat(result.frames, dim=-1).cpu()
-    diagnostics["frames_shape"] = list(frames.shape)
+    _update("frames_shape", list(frames.shape))
 
     tokens: Dict[str, List[int]] = {}
     for idx, phrase in enumerate(phrases):
@@ -183,10 +207,16 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
 
         hidden_states = extract_hidden_states(backbone, PHRASES)
         report["hidden_states_extracted"] = len(hidden_states)
+        write_json(output_dir / "report.json", report)
+
+        teacher_diagnostics: Dict[str, Any] = {}
+        report["teacher_diagnostics"] = teacher_diagnostics
 
         teacher = generate_teacher_tokens(
             PHRASES, args.tts_hf_repo, args.voice_repo, args.tts_nq, args.tts_device,
             args.max_audio_tokens,
+            diagnostics=teacher_diagnostics,
+            on_diagnostics_update=lambda: write_json(output_dir / "report.json", report),
         )
         report["teacher_diagnostics"] = teacher["diagnostics"]
         teacher_tokens = teacher["tokens"]
