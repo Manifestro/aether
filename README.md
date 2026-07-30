@@ -3,6 +3,9 @@
 Research code for the predictive dual-stream architecture described in
 [`spec.md`](spec.md).
 
+The first measured result is documented in
+[`technical_report_01.md`](technical_report_01.md).
+
 The current implementation contains an instrumented sequential baseline and a
 concurrent dual-session runtime. It keeps model adapters separate from the
 runtime so event ordering, dependency rules and latency traces can be tested
