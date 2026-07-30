@@ -1,1 +1,29 @@
-.logs
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Experiment output
+artifacts/
+.logs/
+*.log
+
+# Notebook runtime
+.ipynb_checkpoints/
+
+# Model caches and weights must never enter this repository
+.cache/
+huggingface/
+*.safetensors
+pytorch_model*.bin
+*.gguf
+*.ckpt
+*.pt
+*.pth
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example

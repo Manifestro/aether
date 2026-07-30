@@ -2,6 +2,10 @@
 
 Основной способ запуска — notebook [`notebooks/vox_stage1_colab.ipynb`](notebooks/vox_stage1_colab.ipynb).
 
+После успешного Stage 1 используй
+[`notebooks/vox_stage2_colab.ipynb`](notebooks/vox_stage2_colab.ipynb). Stage 2
+проверяет interleaved token decoding с отдельным KV-cache Planner и Speaker.
+
 ## Перед запуском
 
 1. Загрузи текущий проект в GitHub-репозиторий.
@@ -50,3 +54,20 @@ vox-colab-stage1-logs.zip
 - память и базовую latency.
 
 Он ещё не доказывает одновременное GPU-декодирование двух KV-cache. Это следующий этап после анализа логов.
+
+## Stage 2
+
+Stage 2 использует один набор весов и два независимых decode state. GPU forward
+steps выполняются поочерёдно scheduler-ом с политикой Speaker 3 / Planner 2.
+
+Диагностический архив Stage 2:
+
+```text
+vox-colab-stage2-logs.zip
+```
+
+В `report.json` секция `proof` автоматически показывает:
+
+- появился ли первый токен Speaker до завершения Planner;
+- появился ли первый токен Speaker до завершения MCP;
+- временную разницу между первым токеном и результатом MCP.

@@ -12,15 +12,15 @@ Emit JSONL only: one JSON object per line, with no markdown and no prose.
 Every object must contain: type, sequence, payload.
 Allowed types: intent, tool_call, speech_plan, tool_error, replan, turn_complete.
 Use strictly increasing integer sequence values starting at 0.
+For an actionable tool request, emit tool_call as the first event. Do not emit a separate intent.
 Create safe speech_plan chunks without tool dependencies when possible.
 Any factual chunk requiring a tool must list that tool name in dependencies.
 Do not emit private chain-of-thought. Emit only observable plans and actions.
 For a weather request, follow this structural pattern with values adapted to the user:
-{"type":"intent","sequence":0,"payload":{"name":"get_weather"}}
-{"type":"tool_call","sequence":1,"payload":{"call_id":"weather-1","tool":"weather","arguments":{"location":"Almaty"}}}
-{"type":"speech_plan","sequence":2,"payload":{"chunk_id":"lead-in","goal":"Подтвердить проверку погоды","dependencies":[]}}
-{"type":"speech_plan","sequence":3,"payload":{"chunk_id":"answer","goal":"Сообщить подтверждённую погоду","dependencies":["weather"]}}
-{"type":"turn_complete","sequence":4,"payload":{}}
+{"type":"tool_call","sequence":0,"payload":{"call_id":"weather-1","tool":"weather","arguments":{"location":"Almaty"}}}
+{"type":"speech_plan","sequence":1,"payload":{"chunk_id":"lead-in","goal":"Сообщить, что проверка погоды началась и результат ещё ожидается","dependencies":[]}}
+{"type":"speech_plan","sequence":2,"payload":{"chunk_id":"answer","goal":"Сообщить подтверждённую погоду","dependencies":["weather"]}}
+{"type":"turn_complete","sequence":3,"payload":{}}
 """
 
 _SPEAKER_SYSTEM_PROMPT = """You are the VOX-SYNAPSE Speaker.

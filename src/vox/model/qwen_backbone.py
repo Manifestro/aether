@@ -53,6 +53,18 @@ class SharedQwenBackbone:
     def session_request_counts(self) -> Dict[str, int]:
         return dict(self._session_requests)
 
+    @property
+    def tokenizer(self) -> Any:
+        if self._tokenizer is None:
+            raise RuntimeError("Qwen backbone is not loaded")
+        return self._tokenizer
+
+    @property
+    def model(self) -> Any:
+        if self._model is None:
+            raise RuntimeError("Qwen backbone is not loaded")
+        return self._model
+
     def load(self) -> None:
         if self.loaded:
             return

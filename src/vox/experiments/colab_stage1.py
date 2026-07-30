@@ -40,6 +40,8 @@ class RecordingBackend:
             async for text in self.backend.stream(request):
                 chunks.append(text)
                 yield text
+        except GeneratorExit:
+            raise
         except BaseException as caught:
             error = f"{type(caught).__name__}: {caught}"
             raise
@@ -227,4 +229,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

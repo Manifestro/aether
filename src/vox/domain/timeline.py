@@ -35,6 +35,10 @@ class Timeline:
     def events(self) -> List[TraceEvent]:
         return list(self._events)
 
+    @property
+    def origin_ns(self) -> int:
+        return self._origin_ns
+
     def first(self, name: str) -> TraceEvent:
         for event in self._events:
             if event.name == name:
@@ -43,4 +47,3 @@ class Timeline:
 
     def elapsed_ms(self, start: str, end: str) -> float:
         return (self.first(end).timestamp_ns - self.first(start).timestamp_ns) / 1_000_000
-

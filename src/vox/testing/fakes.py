@@ -4,6 +4,7 @@ from typing import AsyncIterator, Dict, List, Mapping
 from vox.domain.chunks import SpeechChunk
 from vox.domain.events import EventKind, SemanticEvent, ToolCall, ToolResult
 from vox.model.generation import GenerationRequest
+from vox.model.step_scheduler import DecodeStep
 
 
 class WeatherPlanner:
@@ -105,3 +106,39 @@ class ScriptedSharedBackend:
         for offset in range(0, len(text), self.chunk_size):
             await asyncio.sleep(0)
             yield text[offset : offset + self.chunk_size]
+
+
+class FakeTokenStepEngine:
+    """Deterministic token-step engine used to test scheduling without weights."""
+
+    def __init__(
+        self,
+        scripts: Mapping[str, str],
+        token_size: int = 8,
+        step_delay_ms: int = 0,
+    ) -> None:
+        self.scripts = dict(scripts)
+        self.token_size = token_size
+        self.step_delay_ms = step_delay_ms
+        self.created_states = []
+
+    async def create(self, request: GenerationRequest) -> Dict[str, object]:
+        text = self.scripts[request.role]
+        if request.role == "speaker" and '"weather"' in request.messages[-1]["content"]:
+            text = "Сейчас 24 градуса, ожидается дождь — зонт лучше взять."
+        state = {"request": request, "text": text, "offset": 0, "closed": False}
+        self.created_states.append(state)
+        return state
+
+    async def step(self, state: Dict[str, object]) -> DecodeStep:
+        if self.step_delay_ms:
+            await asyncio.sleep(self.step_delay_ms / 1000)
+        offset = int(state["offset"])
+        text = str(state["text"])
+        end = min(offset + self.token_size, len(text))
+        piece = text[offset:end]
+        state["offset"] = end
+        return DecodeStep(text=piece, finished=end >= len(text), token_count=1)
+
+    async def close(self, state: Dict[str, object]) -> None:
+        state["closed"] = True
