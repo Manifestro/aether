@@ -27,6 +27,7 @@ ml = [
     "torch>=2.5",
     "torchaudio>=2.5",
     "transformers>=4.51",
+    "datasets>=2.19",
 ]
 audio = [
     "moshi>=0.2",

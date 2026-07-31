@@ -1,7 +1,7 @@
 """Stage 7, part 1 -- resumable data generation for the real Depth
 Transformer Voice Head training run.
 
-Generates, for ~10,000 English phrases: a Qwen3 hidden state
+Generates, for each phrase in the chosen source: a Qwen3 hidden state
 (`SharedLLMBackbone.encode_hidden_state`) and the real Kyutai teacher's
 tokens for every Mimi codebook (`aether.audio.teacher_tts`). Writes one
 JSONL record per phrase to a cache file -- intended to live on Google
@@ -10,6 +10,12 @@ storage, specifically so an interrupted multi-hour/multi-day run can be
 resumed by just re-running this script: already-cached phrase_ids are
 read back at startup and skipped, and the cache file is flushed after
 every batch, not just at the end.
+
+`--phrase-source template` (the original approach) uses combinatorial
+templates (`training/datasets_large.py`) -- fast and unlimited, but
+formulaic. `--phrase-source sgd` (recommended) pulls real, human-written
+assistant utterances from Schema-Guided Dialogue across 16+ domains, not
+just weather (`training/datasets_sgd.py`).
 
 This is a data-preparation step; `colab_stage7_train.py` (not this file)
 trains `DepthTransformerVoiceHead` on the cache this script produces.
@@ -26,8 +32,19 @@ from typing import Any, Dict, List, Set
 from aether.audio.teacher_tts import generate_teacher_tokens_for_batch, load_tts_model
 from aether.experiments.colab_stage1 import environment_report, write_json
 from aether.model.llm_backbone import LLMBackboneConfig, SharedLLMBackbone
+from aether.training.datasets import Phrase
 from aether.training.datasets_large import generate_phrases
 from aether.training.large_scale_trainer import format_duration
+
+
+def load_phrases(source: str, count: int, seed: int) -> List[Phrase]:
+    if source == "template":
+        return generate_phrases(count, seed=seed)
+    if source == "sgd":
+        from aether.training.datasets_sgd import extract_sgd_phrases
+
+        return extract_sgd_phrases(target_count=count, seed=seed)
+    raise ValueError(f"unknown phrase source: {source!r} (expected 'template' or 'sgd')")
 
 
 def load_cached_phrase_ids(cache_path: Path) -> Set[str]:
@@ -63,6 +80,7 @@ async def run_pipeline(args: argparse.Namespace, output_dir: Path) -> int:
         "model": args.model,
         "tts_hf_repo": args.tts_hf_repo,
         "cache_path": str(cache_path),
+        "phrase_source": args.phrase_source,
         "phrase_count": args.phrase_count,
         "batch_size": args.batch_size,
         "environment": environment_report(),
@@ -71,7 +89,9 @@ async def run_pipeline(args: argparse.Namespace, output_dir: Path) -> int:
     write_json(output_dir / "report.json", report)
 
     try:
-        phrases = generate_phrases(args.phrase_count, seed=args.seed)
+        phrases = load_phrases(args.phrase_source, args.phrase_count, args.seed)
+        report["phrases_loaded"] = len(phrases)
+        write_json(output_dir / "report.json", report)
         already_done = load_cached_phrase_ids(cache_path)
         report["already_cached_at_start"] = len(already_done)
         remaining = [p for p in phrases if p.phrase_id not in already_done]
@@ -169,7 +189,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tts-nq", type=int, default=32)
     parser.add_argument("--tts-device", default="cuda")
     parser.add_argument("--max-audio-tokens", type=int, default=50)
-    parser.add_argument("--phrase-count", type=int, default=10_000)
+    parser.add_argument(
+        "--phrase-source",
+        choices=["template", "sgd"],
+        default="sgd",
+        help="'sgd' = real Schema-Guided Dialogue assistant utterances (recommended, 16+ real "
+        "domains); 'template' = combinatorial weather/greeting/etc phrases (datasets_large.py).",
+    )
+    parser.add_argument("--phrase-count", type=int, default=18_000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--device-map", default="auto")
