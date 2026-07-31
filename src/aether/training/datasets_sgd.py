@@ -3,36 +3,32 @@ replacing `datasets_large.py`'s template-generated phrases with actual
 human-written dialogue turns across 16+ real domains (restaurants, hotels,
 travel, media, weather, banking, ...), not just weather paraphrases.
 
-The dataset (`google-research-datasets/schema_guided_dstc8`, loadable via
-Hugging Face `datasets`) is confirmed to exist and be the right shape
-(dialogues of turns, each turn tagged with a speaker and an utterance) --
-but the exact nested field names were not verified offline. This module
-discovers them defensively at runtime (tries the documented/likely key
-names, raises a specific error listing what it actually found if none
-match) instead of assuming, matching this project's practice for any
-external data source not already used elsewhere in the repo (see the
-Moshi-teacher spikes in `docs/reports/technical_report_03.md` for why).
+Downloads the raw JSON directly from Google's original GitHub release
+(`google-research-datasets/dstc8-schema-guided-dialogue`), not via Hugging
+Face `datasets.load_dataset()` -- that repo is a legacy "dataset script"
+repo, and recent `datasets` versions refuse to run those at all
+(`RuntimeError: Dataset scripts are no longer supported`, hit on a real
+run; see docs/reports/technical_report_03.md). The raw-JSON schema here
+was confirmed directly (one real file fetched and inspected) rather than
+guessed: each dialogue is `{"dialogue_id", "services", "turns"}`, each turn
+is `{"frames", "speaker", "utterance"}` with `speaker` exactly `"USER"` or
+`"SYSTEM"`.
 """
 
+import io
+import json
 import random
-from typing import Any, Dict, List
+import urllib.request
+import zipfile
+from typing import List
 
 from aether.training.datasets import Phrase
 
-_LIKELY_SPEAKER_KEYS = ["speaker", "author", "role"]
-_LIKELY_UTTERANCE_KEYS = ["utterance", "text"]
-_SYSTEM_SPEAKER_VALUES = {"SYSTEM", "system", "System", 1, "1"}
-
-
-def _find_key(record: Dict[str, Any], candidates: List[str]) -> str:
-    for key in candidates:
-        if key in record:
-            return key
-    raise RuntimeError(
-        f"none of the expected keys {candidates} found in an SGD turn record; "
-        f"actual keys: {list(record.keys())} -- inspect this and update "
-        "_LIKELY_SPEAKER_KEYS/_LIKELY_UTTERANCE_KEYS in this module"
-    )
+_REPO_ZIP_URL = (
+    "https://github.com/google-research-datasets/dstc8-schema-guided-dialogue/"
+    "archive/refs/heads/master.zip"
+)
+_SPLIT_DIRS = ("train", "dev", "test")
 
 
 def extract_sgd_phrases(
@@ -40,61 +36,46 @@ def extract_sgd_phrases(
     min_words: int = 3,
     max_words: int = 30,
     seed: int = 0,
-    dataset_id: str = "google-research-datasets/schema_guided_dstc8",
 ) -> List[Phrase]:
     """Extracts real, deduplicated SYSTEM-turn utterances from SGD.
 
-    Raises with a specific, actionable message (not a bare KeyError/IndexError)
-    if the installed `datasets` version's SGD schema doesn't match what this
-    function expects.
+    Downloads the whole repo as a zip (once per call) and reads every
+    `train/dev/test/dialogues_*.json` file directly -- no HF `datasets`
+    dependency, no dataset-script execution.
     """
-    from datasets import load_dataset
-
-    dataset = load_dataset(dataset_id)
+    with urllib.request.urlopen(_REPO_ZIP_URL, timeout=120) as response:
+        zip_bytes = response.read()
 
     seen = set()
     phrases: List[Phrase] = []
-    speaker_key = None
-    utterance_key = None
-
-    for split_name in dataset.keys():
-        for example in dataset[split_name]:
-            turns = example.get("turns")
-            if turns is None:
-                raise RuntimeError(
-                    f"no 'turns' field on an SGD example (split={split_name}); "
-                    f"actual keys: {list(example.keys())}"
-                )
-            # `turns` may be a dict-of-lists (HF's columnar nesting) or a
-            # list-of-dicts, depending on the installed datasets version --
-            # handle both rather than assuming one.
-            if isinstance(turns, dict):
-                num_turns = len(next(iter(turns.values())))
-                turn_records = [{key: value[i] for key, value in turns.items()} for i in range(num_turns)]
-            else:
-                turn_records = list(turns)
-
-            for turn in turn_records:
-                if speaker_key is None:
-                    speaker_key = _find_key(turn, _LIKELY_SPEAKER_KEYS)
-                if utterance_key is None:
-                    utterance_key = _find_key(turn, _LIKELY_UTTERANCE_KEYS)
-                if turn[speaker_key] not in _SYSTEM_SPEAKER_VALUES:
-                    continue
-                text = str(turn[utterance_key]).strip()
-                word_count = len(text.split())
-                if not (min_words <= word_count <= max_words):
-                    continue
-                if text in seen:
-                    continue
-                seen.add(text)
-                phrases.append(Phrase(phrase_id=f"sgd-{len(phrases):05d}", text=text))
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
+        for name in archive.namelist():
+            parts = name.split("/")
+            # e.g. "dstc8-schema-guided-dialogue-master/train/dialogues_001.json"
+            if len(parts) < 3 or parts[1] not in _SPLIT_DIRS:
+                continue
+            if not parts[-1].startswith("dialogues_") or not parts[-1].endswith(".json"):
+                continue
+            with archive.open(name) as handle:
+                dialogues = json.load(handle)
+            for dialogue in dialogues:
+                for turn in dialogue.get("turns", []):
+                    if turn.get("speaker") != "SYSTEM":
+                        continue
+                    text = str(turn.get("utterance", "")).strip()
+                    word_count = len(text.split())
+                    if not (min_words <= word_count <= max_words):
+                        continue
+                    if text in seen:
+                        continue
+                    seen.add(text)
+                    phrases.append(Phrase(phrase_id=f"sgd-{len(phrases):05d}", text=text))
 
     if len(phrases) < target_count:
         raise RuntimeError(
             f"only found {len(phrases)}/{target_count} unique SYSTEM utterances in SGD "
             f"after filtering (min_words={min_words}, max_words={max_words}) -- loosen "
-            "the word-count bounds or double check the speaker-value filter"
+            "the word-count bounds"
         )
 
     random.Random(seed).shuffle(phrases)
