@@ -29,7 +29,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from aether.audio.codec import MimiCodec, MimiCodecConfig
 from aether.experiments.colab_stage1 import environment_report, write_json
 from aether.experiments.colab_stage4 import write_wav
 from aether.model.llm_backbone import LLMBackboneConfig, SharedLLMBackbone
@@ -174,7 +173,20 @@ def generate_teacher_tokens(
         tokens[phrase.phrase_id] = extract_codebook0_tokens(
             frames, idx, tts_model.delay_steps, end_step, max_audio_tokens
         )
-    return {"tokens": tokens, "diagnostics": diagnostics}
+    return {
+        "tokens": tokens,
+        "diagnostics": diagnostics,
+        # Kept alive and returned (not just the extracted codebook-0 ints)
+        # so the caller can decode full 32-codebook audio -- codebook 0
+        # alone is Mimi's semantic stream and is expected to sound like
+        # noise on its own; that is not evidence of a broken pipeline, it
+        # is evidence that single-codebook decode was the wrong listening
+        # test. See run_experiment's wav-writing step.
+        "tts_model": tts_model,
+        "full_frames": frames,
+        "end_steps": result.end_steps,
+        "delay_steps": tts_model.delay_steps,
+    }
 
 
 def extract_hidden_states(backbone: SharedLLMBackbone, phrases: List[Phrase]) -> Dict[str, List[float]]:
@@ -269,35 +281,61 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
         report["held_out_token_agreement"] = held_out_agreement
 
         # Decode train-phrase audio so a human can actually listen, not just
-        # read a loss number. Two files per phrase, both restricted to
-        # codebook 0 only (matching what this Voice Head predicts):
-        #   - "predicted": this trained head's greedy output from hidden state.
-        #   - "teacher-codebook0-only": the teacher's own codebook-0 tokens,
-        #     decoded the same restricted way. This is the ceiling -- even
-        #     the *real* teacher sounds degraded through one codebook alone,
-        #     since Kyutai's TTS was designed around all 32. Comparing
-        #     against this ceiling, not against full-quality speech, is the
-        #     fair comparison for judging what this stage actually learned.
+        # read a loss number. A single-codebook decode (what an earlier
+        # version of this script produced) is near-unintelligible even for
+        # the *real* teacher -- Mimi splits semantic content (codebook 0)
+        # from acoustic detail (codebooks 1-31) by design, so judging
+        # anything by ear off codebook 0 alone is not a fair test. Instead:
+        #   - "teacher_voice_full": the real Kyutai voice, all 32 codebooks
+        #     -- proves the pipeline produces genuine intelligible speech
+        #     at all.
+        #   - "hybrid_our_codebook0": the same 32-codebook reconstruction,
+        #     but with codebook 0 swapped for this trained head's greedy
+        #     prediction. If the phrase is still recognizable, the head
+        #     learned something about content from the hidden state; if it
+        #     turns to mush, it didn't. This is the real test.
+        import torch
+
+        teacher_tts_model = teacher["tts_model"]
+        full_frames = teacher["full_frames"]
+        end_steps = teacher["end_steps"]
+        delay_steps = teacher["delay_steps"]
+        phrase_index = {p.phrase_id: i for i, p in enumerate(PHRASES)}
+        sample_rate = int(teacher_tts_model.mimi.sample_rate)
+
         wav_dir = output_dir / "wav"
         wav_dir.mkdir(parents=True, exist_ok=True)
-        mimi_codec = MimiCodec(
-            MimiCodecConfig(device=args.decode_device, num_codebooks=1, allow_download=args.allow_download)
-        )
-        mimi_codec.load()
 
         train_wav_files: Dict[str, Dict[str, str]] = {}
         for example in train_examples:
             predicted = head._forward_greedy(example.hidden_state)  # noqa: SLF001 -- eval-only introspection
-            predicted_path = wav_dir / f"{example.phrase_id}-predicted.wav"
-            write_wav(predicted_path, mimi_codec.decode(predicted), int(mimi_codec.sample_rate))
+            idx = phrase_index[example.phrase_id]
+            stop = full_frames.shape[-1]
+            if end_steps[idx] is not None:
+                stop = min(stop, delay_steps + end_steps[idx])
+            # frame[:, 1:] excludes the text-token channel (index 0), same
+            # slice moshi/run_tts.py passes to `mimi.decode()`; row 0 of
+            # what remains is codebook 0, the one this head predicts.
+            audio_codebooks = full_frames[idx : idx + 1, 1:, delay_steps:stop].clone()
 
-            teacher_path = wav_dir / f"{example.phrase_id}-teacher-codebook0-only.wav"
-            write_wav(
-                teacher_path, mimi_codec.decode(example.target_tokens), int(mimi_codec.sample_rate)
+            with torch.no_grad():
+                teacher_pcm = teacher_tts_model.mimi.decode(audio_codebooks)
+            teacher_path = wav_dir / f"{example.phrase_id}-teacher-voice-full.wav"
+            write_wav(teacher_path, teacher_pcm[0, 0].cpu().numpy(), sample_rate)
+
+            hybrid_codebooks = audio_codebooks.clone()
+            usable_len = min(hybrid_codebooks.shape[-1], len(predicted))
+            hybrid_codebooks[:, 0, :usable_len] = torch.tensor(
+                predicted[:usable_len], dtype=hybrid_codebooks.dtype
             )
+            with torch.no_grad():
+                hybrid_pcm = teacher_tts_model.mimi.decode(hybrid_codebooks)
+            hybrid_path = wav_dir / f"{example.phrase_id}-hybrid-our-codebook0.wav"
+            write_wav(hybrid_path, hybrid_pcm[0, 0].cpu().numpy(), sample_rate)
+
             train_wav_files[example.phrase_id] = {
-                "predicted": str(predicted_path),
-                "teacher_codebook0_only": str(teacher_path),
+                "teacher_voice_full": str(teacher_path),
+                "hybrid_our_codebook0": str(hybrid_path),
             }
         report["train_wav_files"] = train_wav_files
         write_json(output_dir / "report.json", report)
@@ -334,7 +372,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tts-nq", type=int, default=32)
     parser.add_argument("--tts-device", default="cuda")
     parser.add_argument("--voice-head-device", default="cpu")
-    parser.add_argument("--decode-device", default="cpu")
     parser.add_argument("--vocab-size", type=int, default=2048)
     parser.add_argument("--max-audio-tokens", type=int, default=50)
     parser.add_argument("--epochs", type=int, default=300)
