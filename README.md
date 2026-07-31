@@ -21,6 +21,7 @@ which depends on this repository as a pinned package. See
 | [`docs/spec.md`](docs/spec.md) | Original architecture spec |
 | [`docs/reports/technical_report_01.md`](docs/reports/technical_report_01.md) | First real-model proof: semantic/action lookahead on Qwen3-1.7B |
 | [`docs/reports/technical_report_02.md`](docs/reports/technical_report_02.md) | Constrained grammar, tool allowlisting, plan revision, product API split |
+| [`docs/reports/technical_report_03.md`](docs/reports/technical_report_03.md) | Phase C: audio commit horizon, real speech teacher, standalone hidden-state Voice Head |
 | [`docs/invest_pitch.md`](docs/invest_pitch.md) | Pitch deck content |
 | [`docs/colab.md`](docs/colab.md) | Running the real-model Colab notebooks |
 

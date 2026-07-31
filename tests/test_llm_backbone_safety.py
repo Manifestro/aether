@@ -13,6 +13,11 @@ class LLMBackboneSafetyTests(unittest.TestCase):
         backbone = SharedLLMBackbone(LLMBackboneConfig("local/model/path"))
         self.assertFalse(backbone.loaded)
 
+    def test_generate_with_soft_prompt_requires_explicit_load(self) -> None:
+        backbone = SharedLLMBackbone(LLMBackboneConfig("local/model/path"))
+        with self.assertRaises(RuntimeError):
+            backbone.generate_with_soft_prompt([{"role": "user", "content": "hi"}])
+
 
 if __name__ == "__main__":
     unittest.main()

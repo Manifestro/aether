@@ -1,7 +1,7 @@
 import asyncio
 import threading
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any, AsyncIterator, Dict, Mapping, Optional, Sequence
 
 from aether.model.generation import GenerationRequest
 
@@ -92,6 +92,64 @@ class SharedLLMBackbone:
         last_hidden = outputs.hidden_states[-1]  # (1, seq_len, hidden_size)
         pooled = last_hidden.mean(dim=1).squeeze(0)
         return pooled.float().cpu().tolist()
+
+    def generate_with_soft_prompt(
+        self,
+        messages: Sequence[Mapping[str, str]],
+        soft_prompt_embeddings: Optional[Any] = None,
+        max_new_tokens: int = 128,
+    ) -> str:
+        """Greedy-decodes a response with an optional soft prompt prepended.
+
+        ``soft_prompt_embeddings`` (if given): a ``(num_soft_tokens,
+        hidden_size)`` tensor — e.g. from
+        ``aether.model.thought_bridge.ThoughtBridge.project(...)`` — spliced
+        in as extra input embeddings *before* the tokenized prompt, instead
+        of any additional token ids. ``None`` runs the plain baseline (no
+        injection), for structural-probe comparison.
+
+        This is a plain, synchronous, greedy generate call — deliberately
+        separate from ``stream()``'s threaded streaming path, so this
+        addition cannot affect the already-tested streaming decode logic.
+        Stage 6 (docs/plan.md Level B): the point is to prove this channel
+        changes generation at all, not to produce a good response — no
+        training happens here, and none should be expected to matter yet.
+        """
+        if not self.loaded:
+            raise RuntimeError("LLM backbone is not loaded; call load() explicitly")
+        import torch
+
+        prompt = self._tokenizer.apply_chat_template(
+            list(messages),
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=self.config.enable_thinking,
+        )
+        inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
+        input_embeddings = self._model.get_input_embeddings()(inputs["input_ids"])
+        attention_mask = inputs["attention_mask"]
+
+        if soft_prompt_embeddings is not None:
+            soft = soft_prompt_embeddings.to(
+                device=self._model.device, dtype=input_embeddings.dtype
+            ).unsqueeze(0)
+            input_embeddings = torch.cat([soft, input_embeddings], dim=1)
+            soft_mask = torch.ones(
+                (1, soft.shape[1]), dtype=attention_mask.dtype, device=attention_mask.device
+            )
+            attention_mask = torch.cat([soft_mask, attention_mask], dim=1)
+
+        with torch.no_grad():
+            # With `inputs_embeds`, generate() returns only the newly
+            # generated token ids (there is no token-id form of the prompt
+            # to echo back), so no slicing is needed before decoding.
+            output_ids = self._model.generate(
+                inputs_embeds=input_embeddings,
+                attention_mask=attention_mask,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+            )
+        return self._tokenizer.decode(output_ids[0], skip_special_tokens=True)
 
     def load(self) -> None:
         if self.loaded:

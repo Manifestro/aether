@@ -52,25 +52,34 @@ See [`docs/plan.md`](docs/plan.md) §1 for why the split exists, and
   states — a dependent chunk's audio is never buffered before its tool
   result, and `replan` cancels in-flight audio synthesis exactly like
   buffered text. `docs/colab.md` §Stage 4; `aether/experiments/colab_stage4.py`.
-- **Phase C, Stage 5 — hidden-state-conditioned Voice Head (in progress).**
-  `HiddenStateVoiceHead` predicts Mimi codebook-0 tokens from a Qwen3
-  hidden state (not text — see `aether/model/llm_backbone.py`'s
-  `encode_hidden_state`), trained against a real teacher,
-  `kyutai/tts-1.6b-en_fr` (confirmed via `moshi/run_tts.py` source, not
-  guessed — see the spike notebook). Latest real run: train loss
-  7.86 → 0.009 (expected overfit on ~20 examples), held-out token
-  agreement 0.02–0.40 (well above the ~0.05% chance rate, but not
-  statistically meaningful on 4 examples). **Open/unresolved as of this
-  writing:** the first decode methodology (judging audio quality from
-  codebook 0 alone) was a mistake — Mimi splits semantic content
-  (codebook 0) from acoustic detail (codebooks 1-31), so single-codebook
-  playback is near-noise even for the real teacher. The runner has just
-  been rewritten to decode the full 32-codebook teacher voice
-  (`teacher_voice_full`) and a hybrid with the trained head's codebook-0
-  swapped in (`hybrid_our_codebook0`) — **a fresh Colab run with this
-  fixed decode has not yet been reviewed.** That review is the next
-  concrete step. `aether/experiments/colab_stage5.py`;
-  `aether/training/{datasets,trainer}.py`.
+- **Phase C, Stage 5 — standalone hidden-state Voice Head (closed 31 July
+  2026).** `MultiCodebookVoiceHead` predicts all 32 Mimi codebooks from a
+  Qwen3 hidden state (not text — see `encode_hidden_state`), trained by
+  distillation against a real teacher, `kyutai/tts-1.6b-en_fr` (confirmed
+  via `moshi/run_tts.py` source, not guessed — see the spike notebook), on
+  20 English phrases. Generates audio with **zero channels borrowed from
+  the teacher** at inference — confirmed genuinely independent output via
+  MD5 (an earlier "hybrid" decode — teacher's codebooks 1-31 + our
+  codebook 0 — was byte-identical to the teacher on train phrases, which
+  was memorization, not signal; see `technical_report_03.md` §3.4 for the
+  full methodology story). Final result, human-judged on all 24 phrases:
+  recognizably similar voice, intelligible in places, some words drop out
+  — plausibly the parallel (not sequentially-conditioned) codebook heads,
+  plausibly just the 20-example dataset; not yet distinguished. Full
+  writeup: `docs/reports/technical_report_03.md`.
+- **Phase C→ pivot, Stage 6 — Planner-thought soft-prompt bridge (code
+  written, not yet run in Colab).** Reframing: Stage 5's hidden state came
+  from the Speaker's *own already-decided text* (circular — not "thought
+  before speech"). Stage 6 instead has the Planner write an extended
+  internal thought (structure/facts/tone, never shown to the user, not the
+  constrained JSONL grammar), extracts *its* hidden state, and injects it
+  into Speaker's generation as a soft prompt via `inputs_embeds`
+  (`ThoughtBridge`, `SharedLLMBackbone.generate_with_soft_prompt`) — an
+  untrained structural probe (does the channel change generation at all?),
+  same spirit as Stage 4. Voice/audio work is explicitly paused — Stages
+  6-8 are text-only by deliberate scope decision; see `handoff-6-stage.md`
+  (repo-local, gitignored, not project history) for the fuller internal
+  plan through Stage 8 (train the bridge, then evaluate).
 
 ## 3. Structure
 
@@ -85,21 +94,28 @@ aether/
 │   ├── colab.md                 how to run the Colab notebooks
 │   └── reports/
 │       ├── technical_report_01.md
-│       └── technical_report_02.md
-├── notebooks/                  stage1-5 + Moshi-teacher spike Colab runners
+│       ├── technical_report_02.md
+│       └── technical_report_03.md   Phase C: Stage 4/5 findings, in full
+├── notebooks/                  stage1-6 + Moshi-teacher spike Colab runners
 ├── src/aether/
 │   ├── domain/                  SemanticEvent, ChunkState, Timeline (+ on_event hook), AudioChunk
 │   ├── model/                   event grammar, LLM adapters/backbone/step-engine, scheduler,
-│   │                            voice_head.py (MinimalVoiceHead, HiddenStateVoiceHead)
+│   │                            voice_head.py (MinimalVoiceHead, MultiCodebookVoiceHead),
+│   │                            thought_bridge.py (Stage 6, Planner-thought soft prompt)
 │   ├── runtime/                 SequentialBaseline, DualSessionRuntime (+ optional voice_head),
 │   │                            AllowlistToolExecutor
 │   ├── audio/                   codec.py — lazy Mimi codec wrapper
 │   ├── training/                datasets.py (Stage 5 phrase set), trainer.py (full-batch loop)
 │   ├── testing/                 deterministic fakes — no network/GPU
-│   └── experiments/             colab_stage1-5 runners, spike_moshi_teacher.py (API discovery)
+│   └── experiments/             colab_stage1-6 runners, spike_moshi_teacher.py (API discovery)
 ├── tests/                       dependency-free; see §4
 └── pyproject.toml
 ```
+
+`handoff-6-stage.md` (repo root) is the internal Stage 6-8 working plan —
+**gitignored, not tracked**, purely scratch planning between sessions.
+`docs/reports/technical_report_03.md` is the actual project-history record
+of what Stage 4/5 did and found.
 
 Product Stage 4 (the aether-api one, HTTP) lives in `aether-api` — do not
 confuse it with this repository's Stage 4 (audio commit-horizon probe,
@@ -112,7 +128,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
 No test loads model weights. Real-model experiments run from
-`notebooks/aether_stage{1,2,3,4,5}_colab.ipynb` and
+`notebooks/aether_stage{1,2,3,4,5,6}_colab.ipynb` and
 `notebooks/aether_spike_moshi_teacher_colab.ipynb` on a GPU runtime; see
 `docs/colab.md`.
 
@@ -166,35 +182,41 @@ No test loads model weights. Real-model experiments run from
 
 ## 6. Next research steps
 
-In priority order:
+**Current focus (explicit scope decision, 31 July 2026): text only,
+Stages 6-8, voice/audio paused.** Full detail in `handoff-6-stage.md`
+(gitignored, internal). In priority order:
 
-1. **Review the fixed Stage 5 decode.** `colab_stage5.py` now writes
-   `teacher_voice_full` (real 32-codebook Kyutai voice) and
-   `hybrid_our_codebook0` (same, with the trained head's codebook-0
-   prediction swapped in) per train phrase. A Colab run with this fix has
-   not been reviewed yet — that listening comparison is the actual
-   Continue/Refine/Fallback signal for whether hidden-state conditioning
-   learned anything about content (§20 `spec.md`), not the loss curve
-   alone.
-2. **Kazakh feasibility, before investing in a large recorded corpus.**
-   There is user interest in a real (self-recorded) Kazakh speech corpus
-   (hundreds to ~2000 phrases) to train a Kazakh Voice Head. Cheapest
-   next check: run `SharedLLMBackbone.encode_hidden_state` on a handful of
-   Kazakh phrases on the *actual* backbone in use (Qwen3-1.7B, not
-   Qwen3.5-Flash or any other model not yet wired into this repo) and
-   sanity-check the hidden states look meaningful before committing to
-   weeks of recording. If a self-recorded corpus proceeds, this repo's
-   `training/datasets.py` pattern generalizes directly (phrase list +
-   paired hidden state + paired real Mimi-encoded audio, no synthetic
-   teacher needed since the recordings are the ground truth).
-3. Get a real model to actually emit a `replan` event (design a scenario
-   that gives it a reason to revise), not just the fuzzed synthetic
-   Planner.
-4. Real MCP client adapter behind the existing `ToolExecutor` /
-   `AllowlistToolExecutor` boundary, replacing `FakeWeatherTool`.
-5. LNN / rule-based tempo controller (`docs/plan.md` §6) — not started.
-6. Depth Transformer / remaining 31 Mimi codebooks for the Voice Head —
-   not started; only codebook 0 is predicted so far (§2 above).
+1. **Run Stage 6 in Colab.** `colab_stage6.py` / the Stage 6 notebook are
+   written but not yet executed against real weights — first thing to do.
+   Checks: does the soft-prompt channel change generation deterministically
+   and request-specifically (see the module docstring for the exact
+   claims)? Untrained bridge — not a quality claim yet.
+2. **Stage 7 — train `ThoughtBridge`.** Needs a training signal for "what
+   is a well-organized response given this thought" — not yet designed.
+3. **Stage 8 — evaluate.** Compare Speaker output coherence/organization
+   with vs without thought-conditioning — cheaper than Stage 4/5's audio
+   evaluation (no Mimi/codec involved), can use an LLM-as-judge or direct
+   reading.
+4. **Kazakh — explicitly deferred, not dropped**, until the English
+   thought-bridge work above lands somewhere solid. When it resumes: check
+   `encode_hidden_state` on Kazakh phrases on the *actual* backbone in use
+   (Qwen3-1.7B) before committing to recording a large corpus.
+5. Voice Head follow-ups (Depth Transformer / real inter-codebook
+   conditioning, more training data) — paused alongside voice/audio work
+   generally, not abandoned; Stage 5 is a complete, closed result on its
+   own terms (`technical_report_03.md`).
+6. Get a real model to actually emit a `replan` event, not just the fuzzed
+   synthetic Planner.
+7. Real MCP client adapter behind `ToolExecutor`/`AllowlistToolExecutor`,
+   replacing `FakeWeatherTool` — note there is now a second async-return
+   path to consider alongside plain MCP: Manifestro's own **AWP (Agent
+   Wake Protocol, https://awp.manifestro.io/)**, which handles the case
+   where a tool's result arrives *after* the turn/session that requested
+   it has already ended (MCP alone has no return path for that). Not
+   designed into this repo yet — would need `DualSessionRuntime`/
+   `ChunkState` to support a chunk that stays blocked past the current
+   turn's lifetime, which nothing here currently does.
+8. LNN / rule-based tempo controller (`docs/plan.md` §6) — not started.
 
 Product-track next steps (rate limiting, usage logging, key rotation,
 Web Chat) live in the `aether-api` repository.

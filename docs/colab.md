@@ -1,6 +1,6 @@
 # AETHER — запуск real-model экспериментов в Google Colab
 
-Три notebook'а, по нарастающей сложности:
+Notebook'и, по нарастающей сложности:
 
 1. [`notebooks/aether_stage1_colab.ipynb`](../notebooks/aether_stage1_colab.ipynb) — smoke test:
    один backend, сериализованные вызовы `generate`, проверка совместимости модели/окружения и
@@ -19,18 +19,22 @@
    звучания, просодия и эмоции здесь не оцениваются и не являются критерием выхода — см.
    `aether/model/voice_head.py` и `aether/experiments/colab_stage4.py`.
 5. [`notebooks/aether_stage5_hidden_state_voice_colab.ipynb`](../notebooks/aether_stage5_hidden_state_voice_colab.ipynb) —
-   Level B (spec.md §10): обучает `HiddenStateVoiceHead` предсказывать Mimi codebook-0 токены из
-   **hidden state Qwen3**, не из текста, на ~20 английских фразах, с `kyutai/tts-1.6b-en_fr` как
+   Level B (spec.md §10): обучает `MultiCodebookVoiceHead` предсказывать **все 32 Mimi codebook'а**
+   из hidden state Qwen3, не из текста, на ~20 английских фразах, с `kyutai/tts-1.6b-en_fr` как
    учителем (реальный text-to-speech чекпоинт, вызов подтверждён исходным кодом `moshi/run_tts.py`,
-   не догадкой). Критерий — train loss падает от случайного старта
-   (`checks.train_loss_decreased`), 4 отложенные фразы — мягкое наблюдение, не статистически
-   значимая проверка обобщения. Качество и естественность речи вне области этого прогона.
-   Для train-фраз декодируются два `.wav` на каждую через полный 32-кодбуковый Mimi decoder (не
-   через один codebook — это оказалось нечестным тестом на слух, звучит шумом даже для настоящего
-   учителя, см. §"Ограничения"): `teacher_voice_full` — настоящий голос учителя, все 32 кодбука;
-   `hybrid_our_codebook0` — та же реконструкция, но codebook 0 заменён на предсказание обученной
-   головы, остальные 31 — от учителя. Узнаваемость фразы после подмены — честный сигнал того,
-   выучила ли голова что-то осмысленное про содержание из hidden state.
+   не догадкой). Декодируются `teacher_voice_full` (настоящий голос учителя) и
+   `our_model_standalone` (звук, сгенерированный **целиком** нашей моделью — ноль каналов от
+   учителя; более ранняя версия подменяла только codebook 0 поверх учительских 1-31 — это оказалось
+   нечестным тестом, см. `technical_report_03.md` §3.4). Критерий — train loss падает от случайного
+   старта, звук от нашей модели подтверждённо не идентичен учителю побайтово (не memorization).
+   Качество и естественность речи вне области этого прогона.
+6. [`notebooks/aether_stage6_thought_bridge_colab.ipynb`](../notebooks/aether_stage6_thought_bridge_colab.ipynb) —
+   переосмысление Level B после Stage 5: Planner пишет расширенную внутреннюю "мысль"
+   (структуру ответа, не финальные слова), её hidden state прокидывается в Speaker как soft-prompt
+   через `inputs_embeds` (`ThoughtBridge`, необучен). Проверяет только сам канал — влияет ли
+   инъекция на генерацию вообще (детерминированность, изменение относительно baseline,
+   специфичность к конкретной мысли через cross-conditioning) — не качество ответа. Обучение моста
+   и оценка — Stage 7/8, отдельно.
 
 Продуктовый API (`aether_api`, HTTP/FastAPI) переехал в отдельный репозиторий
 [`Manifestro/aether-api`](https://github.com/Manifestro/aether-api) вместе со своим notebook — это
@@ -51,12 +55,15 @@ API, а печатает его реальную поверхность (мет�
 4. В первой исполняемой ячейке укажи `REPO_URL`/`BRANCH`.
 
 Каждый notebook выполняет: клонирование репозитория → проверку GPU → установку проекта
-(`[dev,ml]` extras для stage1-3, `[dev,ml,audio]` для stage4) → dependency-free тесты → явную
-загрузку `Qwen/Qwen3-1.7B` (и для stage4 — Mimi) → эксперимент → упаковку диагностических файлов
-в архив.
+(`[dev,ml]` extras для stage1-3/6, `[dev,ml,audio]` для stage4/5) → dependency-free тесты → явную
+загрузку `Qwen/Qwen3-1.7B` (и для stage4/5 — Mimi/TTS) → эксперимент → упаковку диагностических
+файлов в архив.
 
 **GPU для stage4:** тот же T4, что уже проверен на stage1-3, — Mimi компактен, а сам Voice Head
 работает на CPU по умолчанию. A100 не обязателен для этого эксперимента.
+
+**GPU для stage6:** тот же T4 — это одна модель (Qwen3-1.7B) и необученный линейный projector
+(`ThoughtBridge`), никакого дополнительного тяжёлого чекпоинта не грузится.
 
 ## Что прислать для анализа
 

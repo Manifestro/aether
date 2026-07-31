@@ -28,3 +28,6 @@ pytorch_model*.bin
 .env
 .env.*
 !.env.example
+
+# Internal scratch roadmaps -- not part of the repo's public history
+handoff-6-stage.md
