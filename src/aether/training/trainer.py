@@ -6,7 +6,10 @@ from typing import Any, List, Sequence
 class TrainingExample:
     phrase_id: str
     hidden_state: List[float]
-    target_tokens: List[int]
+    # A flat [int, ...] (single codebook) or nested [[int, ...], ...] (one
+    # inner list per frame, one int per codebook) -- shape is whatever the
+    # target `head.compute_training_loss` expects; this class doesn't care.
+    target_tokens: Any
 
 
 def train_hidden_state_voice_head(
@@ -15,7 +18,9 @@ def train_hidden_state_voice_head(
     epochs: int,
     lr: float = 1e-3,
 ) -> List[float]:
-    """Full-batch Adam training for a `HiddenStateVoiceHead`.
+    """Full-batch Adam training for a hidden-state-conditioned Voice Head
+    (`HiddenStateVoiceHead` or `MultiCodebookVoiceHead` -- both expose the
+    same `parameters()`/`train_mode()`/`compute_training_loss()` surface).
 
     No DataLoader/batching abstraction -- Stage 5 trains on ~20 examples at
     once specifically because the question is "does this tiny mechanism

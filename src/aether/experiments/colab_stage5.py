@@ -9,17 +9,31 @@ Mimi codebook tokens for arbitrary text -- confirmed from the real
 This stage:
   1. Extracts a Qwen3 hidden state for each of ~24 short English phrases
      (`aether.model.llm_backbone.SharedLLMBackbone.encode_hidden_state`).
-  2. Generates the teacher's codebook-0 tokens for the same phrases via
-     `TTSModel` (frozen, pretrained, real weights).
-  3. Trains a `HiddenStateVoiceHead` (small, from-scratch) to predict the
-     teacher's tokens from the hidden state alone -- `text` is never given
-     to it (see `HiddenStateVoiceHead`'s docstring).
-  4. Reports the loss curve and a soft held-out observation.
+  2. Generates the teacher's tokens for EVERY Mimi codebook (not just
+     codebook 0) for the same phrases via `TTSModel` (frozen, pretrained,
+     real weights).
+  3. Trains a `MultiCodebookVoiceHead` (small, from-scratch) to predict
+     all of those codebooks from the hidden state alone -- `text` is never
+     given to it (see the class docstring). Codebook 0 drives the causal
+     timing; codebooks 1-31 are predicted in parallel from the same
+     per-frame state, a deliberate simplification of Kyutai's real,
+     sequential Depth Transformer.
+  4. Decodes audio generated ENTIRELY by this head (no channel borrowed
+     from the teacher) next to the real teacher's own voice, for both
+     train and held-out phrases -- a hybrid (teacher's codebooks 1-31 +
+     our codebook 0) was tried first and rejected: on train phrases it was
+     byte-identical to the teacher (expected memorization at this loss,
+     not informative), and even on held-out phrases 31 of 32 channels
+     would still be the teacher's, not evidence of what this head can do
+     alone.
+  5. Reports the loss curve and a soft held-out token-agreement observation.
 
 Scope, deliberately: this is a sanity check that the mechanism is
-learnable (does loss drop from a random start?), not a claim about speech
-quality, generalization, or readiness for any language other than English.
-See docs/plan.md Phase C and spec.md Level B for the broader context.
+learnable (does loss drop from a random start, does standalone-generated
+audio carry any recognizable content on held-out phrases?), not a claim
+about production speech quality, prosody, or readiness for any language
+other than English. See docs/plan.md Phase C and spec.md Level B for the
+broader context.
 """
 
 import argparse
@@ -32,7 +46,7 @@ from typing import Any, Dict, List, Optional
 from aether.experiments.colab_stage1 import environment_report, write_json
 from aether.experiments.colab_stage4 import write_wav
 from aether.model.llm_backbone import LLMBackboneConfig, SharedLLMBackbone
-from aether.model.voice_head import HiddenStateVoiceHead, HiddenStateVoiceHeadConfig
+from aether.model.voice_head import MultiCodebookVoiceHead, MultiCodebookVoiceHeadConfig
 from aether.training.datasets import HELD_OUT_PHRASES, PHRASES, TRAIN_PHRASES, Phrase
 from aether.training.trainer import TrainingExample, train_hidden_state_voice_head
 
@@ -62,18 +76,32 @@ def resolve_default_voice(voice_repo: str) -> str:
     return sorted(candidates)[0]
 
 
-def extract_codebook0_tokens(
-    frames: Any, idx: int, delay_steps: int, end_step: Optional[int], max_audio_tokens: int
-) -> List[int]:
+def extract_all_codebook_tokens(
+    frames: Any,
+    idx: int,
+    delay_steps: int,
+    end_step: Optional[int],
+    max_audio_tokens: int,
+    num_codebooks: int,
+) -> List[List[int]]:
+    """Per-frame token vectors for every codebook (not just codebook 0).
+
+    Returns a ``(max_audio_tokens, num_codebooks)`` nested list -- the real
+    training target for `MultiCodebookVoiceHead`, which predicts standalone
+    audio with no channel borrowed from the teacher at inference time.
+    """
     total_len = frames.shape[-1]
     start = delay_steps
     stop = min(total_len, start + max_audio_tokens)
     if end_step is not None:
         stop = min(stop, delay_steps + end_step)
-    codes = [int(code) for code in frames[idx, 1, start:stop].tolist()]
+    # frames[idx, 1:1+num_codebooks, start:stop] -> (num_codebooks, T); this
+    # transposes to (T, num_codebooks), one token vector per frame.
+    codebook_slice = frames[idx, 1 : 1 + num_codebooks, start:stop]
+    codes = [[int(value) for value in frame] for frame in codebook_slice.transpose(0, 1).tolist()]
     if len(codes) < max_audio_tokens:
-        pad_value = codes[-1] if codes else 0
-        codes = codes + [pad_value] * (max_audio_tokens - len(codes))
+        pad_frame = codes[-1] if codes else [0] * num_codebooks
+        codes = codes + [pad_frame] * (max_audio_tokens - len(codes))
     else:
         codes = codes[:max_audio_tokens]
     return codes
@@ -86,10 +114,11 @@ def generate_teacher_tokens(
     tts_nq: int,
     device: str,
     max_audio_tokens: int,
+    num_codebooks: int,
     diagnostics: Optional[Dict[str, Any]] = None,
     on_diagnostics_update: Optional[Any] = None,
 ) -> Dict[str, Any]:
-    """Returns {"tokens": {phrase_id: [int,...]}, "diagnostics": {...}}.
+    """Returns {"tokens": {phrase_id: [[int,...] * num_codebooks] * T}, "diagnostics": {...}}.
 
     Follows `moshi/run_tts.py`'s real call sequence (confirmed via source
     inspection, see the spike reports), not a guessed API.
@@ -167,21 +196,17 @@ def generate_teacher_tokens(
     frames = torch.cat(result.frames, dim=-1).cpu()
     _update("frames_shape", list(frames.shape))
 
-    tokens: Dict[str, List[int]] = {}
+    tokens: Dict[str, List[List[int]]] = {}
     for idx, phrase in enumerate(phrases):
         end_step = result.end_steps[idx]
-        tokens[phrase.phrase_id] = extract_codebook0_tokens(
-            frames, idx, tts_model.delay_steps, end_step, max_audio_tokens
+        tokens[phrase.phrase_id] = extract_all_codebook_tokens(
+            frames, idx, tts_model.delay_steps, end_step, max_audio_tokens, num_codebooks
         )
     return {
         "tokens": tokens,
         "diagnostics": diagnostics,
-        # Kept alive and returned (not just the extracted codebook-0 ints)
-        # so the caller can decode full 32-codebook audio -- codebook 0
-        # alone is Mimi's semantic stream and is expected to sound like
-        # noise on its own; that is not evidence of a broken pipeline, it
-        # is evidence that single-codebook decode was the wrong listening
-        # test. See run_experiment's wav-writing step.
+        # Kept alive and returned so the caller can also decode the
+        # teacher's own real-voice reference for comparison.
         "tts_model": tts_model,
         "full_frames": frames,
         "end_steps": result.end_steps,
@@ -198,9 +223,12 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
         "experiment": "voice_head_stage5_hidden_state_training_probe",
         "scope_note": (
             "Sanity check only: does a tiny hidden-state-conditioned Voice Head learn "
-            "anything from ~20 examples (does loss drop from a random start)? Not a "
-            "claim about speech quality, generalization, or readiness for production "
-            "or for any language beyond English."
+            "anything from ~20 examples? `held_out_wav_files` contains audio generated "
+            "ENTIRELY by this head (no channel borrowed from the teacher) for phrases it "
+            "never trained on -- that is the real test, not the loss curve or the "
+            "train_wav_files (which are expected to sound close to the teacher; the head "
+            "has effectively memorized those). Not a claim about production speech "
+            "quality, prosody, or readiness for any language beyond English."
         ),
         "started_at": datetime.now(timezone.utc).isoformat(),
         "model": args.model,
@@ -237,7 +265,7 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
 
         teacher = generate_teacher_tokens(
             PHRASES, args.tts_hf_repo, args.voice_repo, args.tts_nq, args.tts_device,
-            args.max_audio_tokens,
+            args.max_audio_tokens, args.tts_nq,
             diagnostics=teacher_diagnostics,
             on_diagnostics_update=lambda: write_json(output_dir / "report.json", report),
         )
@@ -245,9 +273,10 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
         teacher_tokens = teacher["tokens"]
         write_json(output_dir / "report.json", report)
 
-        head = HiddenStateVoiceHead(
-            HiddenStateVoiceHeadConfig(
+        head = MultiCodebookVoiceHead(
+            MultiCodebookVoiceHeadConfig(
                 hidden_state_dim=backbone.hidden_size,
+                num_codebooks=args.tts_nq,
                 vocab_size=args.vocab_size,
                 max_audio_tokens=args.max_audio_tokens,
                 device=args.voice_head_device,
@@ -271,33 +300,30 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
 
         # Soft, informal held-out observation -- NOT a pass/fail gate on 4
         # examples (spec.md §20: not statistically meaningful). Compares
-        # each held-out phrase's greedy prediction against its teacher
-        # tokens, token-position agreement rate, purely as an observation.
+        # each held-out phrase's greedy codebook-0 prediction against the
+        # teacher's codebook-0 tokens, position agreement rate, purely as
+        # an observation.
         held_out_agreement: Dict[str, float] = {}
         for example in held_out_examples:
-            predicted = head._forward_greedy(example.hidden_state)  # noqa: SLF001 -- eval-only introspection
-            matches = sum(1 for a, b in zip(predicted, example.target_tokens) if a == b)
-            held_out_agreement[example.phrase_id] = matches / len(example.target_tokens)
+            predicted_frames = head._forward_greedy_all_codebooks(  # noqa: SLF001 -- eval-only
+                example.hidden_state
+            )
+            predicted_codebook0 = [frame[0] for frame in predicted_frames]
+            target_codebook0 = [frame[0] for frame in example.target_tokens]
+            matches = sum(1 for a, b in zip(predicted_codebook0, target_codebook0) if a == b)
+            held_out_agreement[example.phrase_id] = matches / len(target_codebook0)
         report["held_out_token_agreement"] = held_out_agreement
 
         # Decode audio so a human can actually listen, not just read a loss
-        # number. A single-codebook decode (an earlier version of this
-        # script) is near-unintelligible even for the *real* teacher --
-        # Mimi splits semantic content (codebook 0) from acoustic detail
-        # (codebooks 1-31) by design. Instead:
-        #   - "teacher_voice_full": the real Kyutai voice, all 32 codebooks.
-        #   - "hybrid_our_codebook0": the same reconstruction, but codebook 0
-        #     swapped for this head's greedy prediction.
-        #
-        # On TRAIN phrases these two are expected to be near-identical (in
-        # one real run, byte-identical) -- with train loss this low, greedy
-        # decoding reproduces the teacher's exact codebook-0 sequence
-        # (memorization, not a bug; the loss curve already told us this).
-        # That comparison is NOT informative by itself. The comparison that
-        # actually answers "did the head learn anything from hidden state"
-        # is on HELD-OUT phrases, where token agreement is only 6-30%, not
-        # ~100% -- so decode both and keep them clearly separate in the
-        # report.
+        # number. Two files per phrase:
+        #   - "teacher_voice_full": the real Kyutai voice, all `num_codebooks`
+        #     codebooks -- proves the pipeline produces genuine speech.
+        #   - "our_model_standalone": audio generated ENTIRELY by this
+        #     head (`_forward_greedy_all_codebooks`) -- zero channels
+        #     borrowed from the teacher. This is the actual "does our
+        #     system speak on its own" test; a hybrid (teacher codebooks
+        #     1-31 + our codebook 0) is not a fair stand-in for it, since
+        #     31 of 32 channels there would still be the teacher's.
         import torch
 
         teacher_tts_model = teacher["tts_model"]
@@ -306,52 +332,55 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
         delay_steps = teacher["delay_steps"]
         phrase_index = {p.phrase_id: i for i, p in enumerate(PHRASES)}
         sample_rate = int(teacher_tts_model.mimi.sample_rate)
+        num_codebooks = args.tts_nq
 
         wav_dir = output_dir / "wav"
         wav_dir.mkdir(parents=True, exist_ok=True)
 
-        def decode_teacher_and_hybrid(examples: List[TrainingExample]) -> Dict[str, Dict[str, str]]:
+        def decode_teacher_and_ours(examples: List[TrainingExample]) -> Dict[str, Dict[str, str]]:
             wav_files: Dict[str, Dict[str, str]] = {}
             for example in examples:
-                predicted = head._forward_greedy(example.hidden_state)  # noqa: SLF001 -- eval-only introspection
                 idx = phrase_index[example.phrase_id]
                 stop = full_frames.shape[-1]
                 if end_steps[idx] is not None:
                     stop = min(stop, delay_steps + end_steps[idx])
-                # frame[:, 1:] excludes the text-token channel (index 0), same
-                # slice moshi/run_tts.py passes to `mimi.decode()`; row 0 of
-                # what remains is codebook 0, the one this head predicts.
-                # `full_frames` was moved to cpu when built
+                # frame[:, 1:1+num_codebooks] excludes the text-token channel
+                # (index 0), same slice moshi/run_tts.py passes to
+                # `mimi.decode()`. `full_frames` was moved to cpu when built
                 # (generate_teacher_tokens); `mimi` lives on `args.tts_device`.
-                audio_codebooks = full_frames[idx : idx + 1, 1:, delay_steps:stop].clone().to(
-                    args.tts_device
-                )
+                teacher_codebooks = full_frames[
+                    idx : idx + 1, 1 : 1 + num_codebooks, delay_steps:stop
+                ].clone().to(args.tts_device)
 
                 with torch.no_grad():
-                    teacher_pcm = teacher_tts_model.mimi.decode(audio_codebooks)
+                    teacher_pcm = teacher_tts_model.mimi.decode(teacher_codebooks)
                 teacher_path = wav_dir / f"{example.phrase_id}-teacher-voice-full.wav"
                 write_wav(teacher_path, teacher_pcm[0, 0].cpu().numpy(), sample_rate)
 
-                hybrid_codebooks = audio_codebooks.clone()
-                usable_len = min(hybrid_codebooks.shape[-1], len(predicted))
-                hybrid_codebooks[:, 0, :usable_len] = torch.tensor(
-                    predicted[:usable_len], dtype=hybrid_codebooks.dtype, device=hybrid_codebooks.device
+                generated_frames = head._forward_greedy_all_codebooks(  # noqa: SLF001 -- eval-only
+                    example.hidden_state
                 )
+                usable_len = min(teacher_codebooks.shape[-1], len(generated_frames))
+                generated_tensor = torch.tensor(
+                    generated_frames[:usable_len],
+                    dtype=teacher_codebooks.dtype,
+                    device=teacher_codebooks.device,
+                ).transpose(0, 1).unsqueeze(0)  # (1, num_codebooks, T)
                 with torch.no_grad():
-                    hybrid_pcm = teacher_tts_model.mimi.decode(hybrid_codebooks)
-                hybrid_path = wav_dir / f"{example.phrase_id}-hybrid-our-codebook0.wav"
-                write_wav(hybrid_path, hybrid_pcm[0, 0].cpu().numpy(), sample_rate)
+                    ours_pcm = teacher_tts_model.mimi.decode(generated_tensor)
+                ours_path = wav_dir / f"{example.phrase_id}-our-model-standalone.wav"
+                write_wav(ours_path, ours_pcm[0, 0].cpu().numpy(), sample_rate)
 
                 wav_files[example.phrase_id] = {
                     "teacher_voice_full": str(teacher_path),
-                    "hybrid_our_codebook0": str(hybrid_path),
+                    "our_model_standalone": str(ours_path),
                 }
             return wav_files
 
-        report["train_wav_files"] = decode_teacher_and_hybrid(train_examples)
+        report["train_wav_files"] = decode_teacher_and_ours(train_examples)
         write_json(output_dir / "report.json", report)
         # The actual test: phrases the head never saw during training.
-        report["held_out_wav_files"] = decode_teacher_and_hybrid(held_out_examples)
+        report["held_out_wav_files"] = decode_teacher_and_ours(held_out_examples)
         write_json(output_dir / "report.json", report)
 
         checks = {
