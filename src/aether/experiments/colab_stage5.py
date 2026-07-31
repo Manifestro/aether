@@ -316,7 +316,11 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
             # frame[:, 1:] excludes the text-token channel (index 0), same
             # slice moshi/run_tts.py passes to `mimi.decode()`; row 0 of
             # what remains is codebook 0, the one this head predicts.
-            audio_codebooks = full_frames[idx : idx + 1, 1:, delay_steps:stop].clone()
+            # `full_frames` was moved to cpu when built (generate_teacher_tokens);
+            # `mimi` lives on `args.tts_device` -- move the slice to match.
+            audio_codebooks = full_frames[idx : idx + 1, 1:, delay_steps:stop].clone().to(
+                args.tts_device
+            )
 
             with torch.no_grad():
                 teacher_pcm = teacher_tts_model.mimi.decode(audio_codebooks)
@@ -326,7 +330,7 @@ async def run_experiment(args: argparse.Namespace, output_dir: Path) -> int:
             hybrid_codebooks = audio_codebooks.clone()
             usable_len = min(hybrid_codebooks.shape[-1], len(predicted))
             hybrid_codebooks[:, 0, :usable_len] = torch.tensor(
-                predicted[:usable_len], dtype=hybrid_codebooks.dtype
+                predicted[:usable_len], dtype=hybrid_codebooks.dtype, device=hybrid_codebooks.device
             )
             with torch.no_grad():
                 hybrid_pcm = teacher_tts_model.mimi.decode(hybrid_codebooks)

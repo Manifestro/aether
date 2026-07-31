@@ -62,9 +62,22 @@ uv sync --extra dev --extra ml --extra audio
 - LLM Planner/Speaker adapters, named generically (`llm_adapters.py`) —
   currently backed by Qwen3, but Qwen is a Planner-candidate, not an
   architectural commitment (`docs/plan.md` §3);
+- an optional `VoiceHead` seam on `DualSessionRuntime` (`voice_head=None`
+  by default, zero behavior change for every existing caller): a Speaker
+  chunk's audio is synthesized at the same commit horizon as its text,
+  reusing `ChunkState`'s existing transition table rather than a new one;
+- two `VoiceHead` implementations, both predicting a single Mimi codebook
+  from scratch (untrained by design — see `docs/plan.md` Phase C):
+  `MinimalVoiceHead` (conditions on Speaker text) and
+  `HiddenStateVoiceHead` (conditions on the Speaker's internal hidden
+  state instead, ignoring text entirely);
+- a lazy `MimiCodec` wrapper (`aether/audio/codec.py`) and a minimal
+  training loop (`aether/training/`) for distilling `HiddenStateVoiceHead`
+  against a real teacher (`kyutai/tts-1.6b-en_fr`);
 - deterministic fakes (`aether.testing`) for dependency-free integration
   tests, including 1,000+ synthetic-turn fuzz coverage.
 
 No model is loaded by importing or constructing these adapters. Loading
 is an explicit operation reserved for the target ML environment (see
-`docs/colab.md`).
+`docs/colab.md`). See `HANDOFF.md` §2 for what's actually been verified
+on real weights vs. what's still in progress.
